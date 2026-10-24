@@ -1,6 +1,7 @@
 import {
 	clampThinkingLevel,
 	createModels,
+	createProvider,
 	getSupportedThinkingLevels,
 	type Api,
 	type Model,
@@ -8,9 +9,11 @@ import {
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import type { CustomProviderConfig } from "../core/contracts/custom-providers.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
@@ -47,6 +50,60 @@ export interface PiEngine {
 export type { ThinkingLevel };
 
 let collection: ReturnType<typeof createModels> | undefined;
+let customProviderInitializer: ((m: Models) => void) | undefined;
+
+export function setCustomProviderInitializer(fn: (m: Models) => void): void {
+	customProviderInitializer = fn;
+	if (collection) fn(collection);
+}
+
+export function buildCustomPiProvider(config: CustomProviderConfig) {
+	const apiKey = config.apiKey?.trim() || "";
+	const models = config.models.map((m) => ({
+		id: m.id,
+		name: m.name || m.id,
+		api: "openai-completions" as const,
+		baseUrl: config.baseUrl,
+		provider: config.id,
+		reasoning: m.reasoning,
+		input: m.acceptsImages ? (["text", "image"] as const) : (["text"] as const),
+		cost: {
+			input: m.cost?.input ?? 0,
+			output: m.cost?.output ?? 0,
+			cacheRead: m.cost?.cacheRead ?? 0,
+			cacheWrite: m.cost?.cacheWrite ?? 0,
+		},
+		contextWindow: m.contextWindow || 1000000,
+		maxTokens: m.maxTokens || 4096,
+		type: "chat" as const,
+	}));
+
+	return createProvider({
+		id: config.id,
+		name: config.name || config.id,
+		baseUrl: config.baseUrl,
+		auth: {
+			apiKey: {
+				name: `${config.name || config.id} API key`,
+				resolve: async () => ({
+					auth: { apiKey: config.noKeyNeeded ? "none" : apiKey },
+				}),
+			},
+		},
+		models,
+		api: openAICompletionsApi(),
+	});
+}
+
+export function registerCustomPiProvider(config: CustomProviderConfig): void {
+	const models = piModels();
+	models.setProvider(buildCustomPiProvider(config));
+}
+
+export function removeCustomPiProvider(id: string): void {
+	const models = piModels();
+	models.deleteProvider(id);
+}
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
@@ -60,6 +117,7 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
+		if (customProviderInitializer) customProviderInitializer(collection);
 	}
 	return collection;
 }

@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
 		"*": [
 			"**/data/**/*",
 			"auth.json",
+			"custom-providers.json",
 			".env*",
 		],
 	},

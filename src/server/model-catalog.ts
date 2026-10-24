@@ -44,6 +44,7 @@ import type {
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
 import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
+import { loadCustomProviders } from "./custom-providers.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
 export type ModelDto = ModelCatalogEntry;
@@ -130,11 +131,19 @@ export function catalogSlots(): SlotPins {
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
 export function catalogProviders(): CatalogProvider[] {
+	const customRows: CatalogProvider[] = loadCustomProviders().map((cp) => ({
+		id: cp.id,
+		envVar: "",
+		keyPresent: cp.noKeyNeeded || Boolean(cp.apiKey && cp.apiKey.trim().length > 0),
+	}));
 	return AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).concat([{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() }]).sort((a, b) => a.id.localeCompare(b.id));
+	}))
+		.concat([{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() }])
+		.concat(customRows)
+		.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly

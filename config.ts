@@ -143,3 +143,11 @@ export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
 export const AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(process.env.LH_AUTH_FILE)
 	: path.join(ROOT, "auth.json");
+
+/**
+ * Custom OpenAI-compatible endpoints & provider configurations.
+ * Stored at DATA_ROOT/custom-providers.json with mode 0600.
+ */
+export const CUSTOM_PROVIDERS_FILE = process.env.LH_CUSTOM_PROVIDERS_FILE
+	? path.resolve(process.env.LH_CUSTOM_PROVIDERS_FILE)
+	: path.join(DATA_ROOT, "custom-providers.json");

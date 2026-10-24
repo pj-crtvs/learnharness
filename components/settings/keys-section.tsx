@@ -24,9 +24,10 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
+import { AUTH_KEYS, type AuthKeyStatus, type SafeCustomProviderDto } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { ChatGPTConnection } from "./chatgpt-connection.tsx";
+import { CustomProviderCard } from "./custom-provider-editor.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -326,6 +327,8 @@ export function KeysSection({
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
+	const [customProviders, setCustomProviders] = useState<SafeCustomProviderDto[]>([]);
+	const [creatingCustom, setCreatingCustom] = useState(false);
 	const [loading, setLoading] = useState(true);
 	/** The unfolded row (its id), null = all folded. Seeded by the
 	 *  deep-link (initialRow) and re-followed when it retargets. */
@@ -351,15 +354,29 @@ export function KeysSection({
 		return () => document.removeEventListener("keydown", onKeyDown, true);
 	}, [openRow, adding]);
 
+	const reloadCustomProviders = async () => {
+		try {
+			const res = await fetch("/api/custom-providers");
+			if (res.ok) {
+				const body = (await res.json()) as { providers?: SafeCustomProviderDto[] };
+				if (body.providers) setCustomProviders(body.providers);
+			}
+		} catch {
+			// ignore
+		}
+	};
+
 	const reload = () =>
-		fetch("/api/keys")
-			.then((r) => r.json())
-			.then((body: KeysResponse) => {
-				setStatuses(body.keys ?? []);
-				if (body.providers) setProviders(body.providers);
-			})
-			.catch(() => setStatuses([]))
-			.finally(() => setLoading(false));
+		Promise.all([
+			fetch("/api/keys")
+				.then((r) => r.json())
+				.then((body: KeysResponse) => {
+					setStatuses(body.keys ?? []);
+					if (body.providers) setProviders(body.providers);
+				})
+				.catch(() => setStatuses([])),
+			reloadCustomProviders(),
+		]).finally(() => setLoading(false));
 
 	useEffect(() => {
 		void reload();
@@ -453,6 +470,67 @@ export function KeysSection({
 						<span className="font-mono text-[11px] text-muted-foreground">{status.masked}</span>
 					</div>)}
 				</div>}
+			</SettingsGroup>
+
+			<SettingsGroup label="Custom providers" testid="group-custom-providers">
+				<div className="flex flex-col gap-3">
+					{customProviders.map((cp) => (
+						<CustomProviderCard
+							key={cp.id}
+							provider={cp}
+							onSave={async (config) => {
+								const res = await fetch(`/api/custom-providers/${config.id}`, {
+									method: "PUT",
+									headers: { "content-type": "application/json" },
+									body: JSON.stringify(config),
+								});
+								if (!res.ok) {
+									const data = await res.json().catch(() => ({}));
+									return data.error ?? "Failed to save custom provider";
+								}
+								await reloadCustomProviders();
+								notifySettingsSaved("keys");
+								return null;
+							}}
+							onDelete={async (id) => {
+								await fetch(`/api/custom-providers/${id}`, { method: "DELETE" }).catch(() => {});
+								await reloadCustomProviders();
+								notifySettingsSaved("keys");
+							}}
+						/>
+					))}
+					{creatingCustom ? (
+						<CustomProviderCard
+							provider={null}
+							initialEditing={true}
+							onSave={async (config) => {
+								const res = await fetch("/api/custom-providers", {
+									method: "POST",
+									headers: { "content-type": "application/json" },
+									body: JSON.stringify(config),
+								});
+								if (!res.ok) {
+									const data = await res.json().catch(() => ({}));
+									return data.error ?? "Failed to create custom provider";
+								}
+								setCreatingCustom(false);
+								await reloadCustomProviders();
+								notifySettingsSaved("keys");
+								return null;
+							}}
+							onCancelNew={() => setCreatingCustom(false)}
+						/>
+					) : (
+						<button
+							type="button"
+							onClick={() => setCreatingCustom(true)}
+							data-testid="add-custom-provider"
+							className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left font-ui text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+						>
+							<span>+ Add custom provider</span>
+						</button>
+					)}
+				</div>
 			</SettingsGroup>
 
 			<SettingsGroup label="Subscriptions" testid="group-subscriptions">
