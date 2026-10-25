@@ -96,6 +96,9 @@ const nextConfig: NextConfig = {
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@resvg/resvg-js", // native binding — same
 	],
+	experimental: {
+		turbopackPluginRuntimeStrategy: "workerThreads",
+	},
 };
 
 export default nextConfig;

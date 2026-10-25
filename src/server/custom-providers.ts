@@ -1,15 +1,16 @@
-import type {
-	CustomModelConfig,
-	CustomProviderConfig,
-	SafeCustomProviderDto,
+import {
+	DEFAULT_CUSTOM_PROVIDERS,
+	type CustomModelConfig,
+	type CustomProviderConfig,
+	type SafeCustomProviderDto,
 } from "../core/contracts/custom-providers.ts";
 import { maskKey } from "../core/auth-keys.ts";
 import {
 	registerCustomPiProvider,
 	removeCustomPiProvider,
+	setCustomProviderSource,
 } from "../agent/models.ts";
 import {
-	DEFAULT_CUSTOM_PROVIDERS,
 	readCustomProviders,
 	writeCustomProviders,
 } from "../store/custom-providers.ts";
@@ -19,6 +20,8 @@ export { DEFAULT_CUSTOM_PROVIDERS };
 export function loadCustomProviders(): CustomProviderConfig[] {
 	return readCustomProviders();
 }
+
+setCustomProviderSource(() => loadCustomProviders());
 
 export function toSafeCustomProviderDto(provider: CustomProviderConfig): SafeCustomProviderDto {
 	const hasKey = Boolean(provider.apiKey && provider.apiKey.trim().length > 0);

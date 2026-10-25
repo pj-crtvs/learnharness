@@ -14,7 +14,6 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
-import type { CustomProviderConfig } from "../core/contracts/custom-providers.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
@@ -50,12 +49,20 @@ export interface PiEngine {
 
 export type { ThinkingLevel };
 
-let collection: MutableModels | undefined;
-let customProviderInitializer: ((m: MutableModels) => void) | undefined;
+import {
+	DEFAULT_CUSTOM_PROVIDERS,
+	type CustomProviderConfig,
+} from "../core/contracts/custom-providers.ts";
 
-export function setCustomProviderInitializer(fn: (m: MutableModels) => void): void {
-	customProviderInitializer = fn;
-	if (collection) fn(collection);
+let collection: MutableModels | undefined;
+type CustomProviderSource = () => readonly CustomProviderConfig[];
+let customProviderSource: CustomProviderSource | undefined;
+
+export function setCustomProviderSource(fn: CustomProviderSource): void {
+	customProviderSource = fn;
+	if (collection) {
+		for (const custom of fn()) collection.setProvider(buildCustomPiProvider(custom));
+	}
 }
 
 export function buildCustomPiProvider(config: CustomProviderConfig) {
@@ -108,8 +115,6 @@ export function removeCustomPiProvider(id: string): void {
 	models.deleteProvider(id);
 }
 
-import { readCustomProviders } from "../store/custom-providers.ts";
-
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
  *  against all of pi-ai's per-provider catalogs, so a settings slot can pin
@@ -122,7 +127,8 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
-		for (const custom of readCustomProviders()) collection.setProvider(buildCustomPiProvider(custom));
+		const customList = customProviderSource ? customProviderSource() : DEFAULT_CUSTOM_PROVIDERS;
+		for (const custom of customList) collection.setProvider(buildCustomPiProvider(custom));
 	}
 	return collection;
 }
