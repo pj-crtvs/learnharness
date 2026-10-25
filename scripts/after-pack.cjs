@@ -23,5 +23,10 @@ module.exports = async function afterPack(context) {
 	const target = path.join(appBundle, "Contents", "Resources", "icon.icns");
 	const source = path.join(context.packager.info.projectDir, "build", "icon.icns");
 	fs.copyFileSync(source, target);
+	const updateYml = path.join(appBundle, "Contents", "Resources", "app-update.yml");
+	if (fs.existsSync(updateYml) && !process.env.APPLE_KEYCHAIN_PROFILE) {
+		fs.unlinkSync(updateYml);
+		console.log(`[after-pack] removed app-update.yml for unsigned build`);
+	}
 	console.log(`[after-pack] pre-Tahoe fallback icns (full-res) → ${target}`);
 };

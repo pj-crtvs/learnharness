@@ -462,8 +462,13 @@ function installUpdateNow() {
 }
 
 function setupAutoUpdater() {
-	if (!app.isPackaged) {
-		log("auto-update: dev build — updater disabled");
+	if (!app.isPackaged || process.env.LH_DISABLE_UPDATES === "1") {
+		log("auto-update: dev build or disabled — updater disabled");
+		return;
+	}
+	const updateConfigPath = path.join(process.resourcesPath, "app-update.yml");
+	if (!fs.existsSync(updateConfigPath)) {
+		log("auto-update: app-update.yml not present — updater disabled");
 		return;
 	}
 	try {
