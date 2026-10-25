@@ -6,6 +6,7 @@ import {
 	type Api,
 	type Model,
 	type Models,
+	type MutableModels,
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
@@ -49,10 +50,10 @@ export interface PiEngine {
 
 export type { ThinkingLevel };
 
-let collection: ReturnType<typeof createModels> | undefined;
-let customProviderInitializer: ((m: Models) => void) | undefined;
+let collection: MutableModels | undefined;
+let customProviderInitializer: ((m: MutableModels) => void) | undefined;
 
-export function setCustomProviderInitializer(fn: (m: Models) => void): void {
+export function setCustomProviderInitializer(fn: (m: MutableModels) => void): void {
 	customProviderInitializer = fn;
 	if (collection) fn(collection);
 }
@@ -66,7 +67,9 @@ export function buildCustomPiProvider(config: CustomProviderConfig) {
 		baseUrl: config.baseUrl,
 		provider: config.id,
 		reasoning: m.reasoning,
-		input: m.acceptsImages ? (["text", "image"] as const) : (["text"] as const),
+		input: m.acceptsImages
+			? (["text", "image"] as ("text" | "image")[])
+			: (["text"] as ("text" | "image")[]),
 		cost: {
 			input: m.cost?.input ?? 0,
 			output: m.cost?.output ?? 0,
@@ -105,6 +108,8 @@ export function removeCustomPiProvider(id: string): void {
 	models.deleteProvider(id);
 }
 
+import { readCustomProviders } from "../store/custom-providers.ts";
+
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
  *  against all of pi-ai's per-provider catalogs, so a settings slot can pin
@@ -117,7 +122,7 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
-		if (customProviderInitializer) customProviderInitializer(collection);
+		for (const custom of readCustomProviders()) collection.setProvider(buildCustomPiProvider(custom));
 	}
 	return collection;
 }

@@ -36,3 +36,34 @@ export interface SafeCustomProviderDto extends Omit<CustomProviderConfig, "apiKe
 	keySaved: boolean;
 	maskedKey: string | null;
 }
+
+export const DEFAULT_CUSTOM_PROVIDERS: readonly CustomProviderConfig[] = [
+	{
+		id: "custom-pandev",
+		name: "pandev",
+		baseUrl: "https://llmrouter.boyemma.com/v1",
+		dialect: "openai-completions",
+		noKeyNeeded: false,
+		apiKey: "sk-Y_I9r7GUE-kJ5ir_e6v7Fg",
+		models: [
+			{
+				id: "auto",
+				name: "auto",
+				contextWindow: 1000000,
+				maxTokens: 1000000000,
+				reasoning: true,
+				acceptsImages: true,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			},
+			{
+				id: "flash",
+				name: "flash",
+				contextWindow: 256000,
+				maxTokens: 1000000000,
+				reasoning: true,
+				acceptsImages: true,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			},
+		],
+	},
+];

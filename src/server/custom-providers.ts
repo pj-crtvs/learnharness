@@ -1,12 +1,3 @@
-/**
- * Custom provider server adapter: reads, writes, and synchronizes custom
- * OpenAI-compatible model providers (custom endpoints / routers) from
- * config.CUSTOM_PROVIDERS_FILE with the live pi-ai Models collection.
- */
-
-import fs from "node:fs";
-import path from "node:path";
-import { CUSTOM_PROVIDERS_FILE } from "../../config.ts";
 import type {
 	CustomModelConfig,
 	CustomProviderConfig,
@@ -14,88 +5,19 @@ import type {
 } from "../core/contracts/custom-providers.ts";
 import { maskKey } from "../core/auth-keys.ts";
 import {
-	buildCustomPiProvider,
 	registerCustomPiProvider,
 	removeCustomPiProvider,
-	setCustomProviderInitializer,
 } from "../agent/models.ts";
+import {
+	DEFAULT_CUSTOM_PROVIDERS,
+	readCustomProviders,
+	writeCustomProviders,
+} from "../store/custom-providers.ts";
 
-export const DEFAULT_CUSTOM_PROVIDERS: readonly CustomProviderConfig[] = [
-	{
-		id: "custom-pandev",
-		name: "pandev",
-		baseUrl: "https://llmrouter.boyemma.com/v1",
-		dialect: "openai-completions",
-		noKeyNeeded: false,
-		apiKey: "sk-Y_I9r7GUE-kJ5ir_e6v7Fg",
-		models: [
-			{
-				id: "auto",
-				name: "auto",
-				contextWindow: 1000000,
-				maxTokens: 1000000000,
-				reasoning: true,
-				acceptsImages: true,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			},
-			{
-				id: "flash",
-				name: "flash",
-				contextWindow: 256000,
-				maxTokens: 1000000000,
-				reasoning: true,
-				acceptsImages: true,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			},
-		],
-	},
-];
-
-let inMemoryCustomProviders: CustomProviderConfig[] | undefined;
-
-function ensureFileSeeded(): void {
-	if (!fs.existsSync(CUSTOM_PROVIDERS_FILE)) {
-		writeCustomProviders([...DEFAULT_CUSTOM_PROVIDERS]);
-	}
-}
+export { DEFAULT_CUSTOM_PROVIDERS };
 
 export function loadCustomProviders(): CustomProviderConfig[] {
-	if (inMemoryCustomProviders) return inMemoryCustomProviders;
-	ensureFileSeeded();
-	try {
-		const raw = fs.readFileSync(CUSTOM_PROVIDERS_FILE, "utf-8");
-		const parsed = JSON.parse(raw);
-		if (Array.isArray(parsed)) {
-			inMemoryCustomProviders = parsed.filter(isValidCustomProvider);
-			return inMemoryCustomProviders;
-		}
-	} catch {
-		// absent or unreadable
-	}
-	inMemoryCustomProviders = [...DEFAULT_CUSTOM_PROVIDERS];
-	return inMemoryCustomProviders;
-}
-
-function writeCustomProviders(providers: CustomProviderConfig[]): void {
-	inMemoryCustomProviders = providers;
-	const dir = path.dirname(CUSTOM_PROVIDERS_FILE);
-	fs.mkdirSync(dir, { recursive: true });
-	const tmp = path.join(dir, `.custom-providers.tmp-${process.pid}-${Date.now()}`);
-	fs.writeFileSync(tmp, `${JSON.stringify(providers, null, "\t")}\n`, { mode: 0o600 });
-	fs.chmodSync(tmp, 0o600);
-	fs.renameSync(tmp, CUSTOM_PROVIDERS_FILE);
-}
-
-function isValidCustomProvider(p: unknown): p is CustomProviderConfig {
-	if (!p || typeof p !== "object" || Array.isArray(p)) return false;
-	const obj = p as Record<string, unknown>;
-	return (
-		typeof obj.id === "string" &&
-		obj.id.startsWith("custom-") &&
-		typeof obj.name === "string" &&
-		typeof obj.baseUrl === "string" &&
-		Array.isArray(obj.models)
-	);
+	return readCustomProviders();
 }
 
 export function toSafeCustomProviderDto(provider: CustomProviderConfig): SafeCustomProviderDto {
@@ -241,9 +163,3 @@ export function deleteCustomProvider(id: string): void {
 	writeCustomProviders(next);
 	removeCustomPiProvider(id);
 }
-
-setCustomProviderInitializer((collection) => {
-	for (const p of loadCustomProviders()) {
-		collection.setProvider(buildCustomPiProvider(p));
-	}
-});
