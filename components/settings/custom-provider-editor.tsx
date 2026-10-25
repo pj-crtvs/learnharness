@@ -40,7 +40,7 @@ export function CustomProviderCard({
 						id: "auto",
 						name: "auto",
 						contextWindow: 1000000,
-						maxTokens: 1000000000,
+						maxTokens: 16384,
 						reasoning: true,
 						acceptsImages: true,
 						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -81,7 +81,7 @@ export function CustomProviderCard({
 				id: "",
 				name: "",
 				contextWindow: 1000000,
-				maxTokens: 1000000000,
+				maxTokens: 16384,
 				reasoning: true,
 				acceptsImages: true,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -333,7 +333,7 @@ export function CustomProviderCard({
 											onChange={(e) =>
 												updateModel(idx, { maxTokens: parseInt(e.target.value, 10) || 4096 })
 											}
-											placeholder="1000000000"
+											placeholder="16384"
 											className="h-6 rounded-sm border border-border bg-background px-1.5 text-xs text-foreground outline-none focus:border-muted-foreground"
 										/>
 									</div>
