@@ -5,6 +5,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createWebTools } from "../src/agent/tools/web.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
 import { runResearcherAgent } from "../src/agent/subagents/researcher.ts";
@@ -272,6 +274,26 @@ describe("keyless research dispatch (jobTools)", () => {
 	it("absent seam = available (tests + any wiring without search)", () => {
 		const tools = jobTools(fakeCtx());
 		assert.ok(tools.research, "the seam is optional — default is honest availability");
+	});
+});
+
+describe("pdf dispatch resolves learner-relative paths against HOME (owner, 2026-10-27)", () => {
+	it("'Desktop/book.pdf' becomes an absolute home path; absolute stays untouched", async () => {
+		const spawned: Array<{ job: JobRecord; input: unknown }> = [];
+		const tools = jobTools({
+			...fakeCtx(),
+			spawn: (job, input) => {
+				spawned.push({ job, input });
+			},
+		});
+		await tools.pdf!.execute!("pdf-relative", { path: "Desktop/book.pdf", question: "q" });
+		assert.equal(
+			(spawned[0]!.input as { path: string }).path,
+			path.join(os.homedir(), "Desktop", "book.pdf"),
+			"the reader must never stat relative to the server's install directory",
+		);
+		await tools.pdf!.execute!("pdf-absolute", { path: "/tmp/notes.pdf", question: "q" });
+		assert.equal((spawned[1]!.input as { path: string }).path, "/tmp/notes.pdf");
 	});
 });
 

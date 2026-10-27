@@ -2572,7 +2572,7 @@ describe("question-content fallback in the pipeline (owner, 2026-10-27)", () => 
 			graphStore: ledgers,
 			extractor: submitModel("submit_findings", FINDINGS),
 			auditor: submitModel("submit_review", { links: [] } satisfies AuditVerdicts),
-			questionVerifier: verifier({ verdict: "agree", correct: ["230"], reason: "the declared width is right" }),
+			questionVerifier: verifier({ answer: ["230"], reason: "200 content + 20 padding + 10 border" }),
 		});
 
 		assert.equal(coverageOf(chatStore.getChat(chatId)!.messages, [], chatId).uncoveredCount, 0, "prose view sees nothing");
@@ -2593,7 +2593,7 @@ describe("question-content fallback in the pipeline (owner, 2026-10-27)", () => 
 				throw new Error("disputed question must never reach the extractor");
 			}]),
 			auditor: submitModel("submit_review", { links: [] } satisfies AuditVerdicts),
-			questionVerifier: verifier({ verdict: "disagree", correct: ["230"], reason: "the committed answer is 250, which double-counts padding" }),
+			questionVerifier: verifier({ answer: ["250"], reason: "200 + 20 + 20 + 5 + 5" }),
 		});
 
 		const stats = await pipeline.runExtraction(chatId);

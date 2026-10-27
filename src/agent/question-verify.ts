@@ -95,9 +95,10 @@ export interface QuestionVerifier {
 export const SOLVER_SYSTEM_PROMPT = `You are an independent solver for a learning app. You will be given a question and nothing else about it. There is no known answer; do not assume any option is correct.
 
 Method:
-1. Work the problem out yourself — compute, derive, or recall the facts. Show enough reasoning in "reason" that a teacher can check it.
+1. Work the problem out yourself — compute, derive, or recall the facts.
 2. Answer exactly as the question asks. Use the same units and precision as the question.
-3. If the question is ambiguous, underspecified, or cannot be answered, say so in "reason" and give your best answer anyway.
+3. Keep "reason" to at most TWO short sentences: the decisive computation or fact, not a full essay.
+4. If the question is ambiguous, underspecified, or cannot be answered, say so in "reason" and give your best answer anyway.
 
 For a multiple-choice question:
 - "answer" lists the option VALUE strings you found correct (for example ["230"], not the label if the label differs). Include every correct option for a multiple-select question.
@@ -153,14 +154,16 @@ export function solverPrompt(input: QuestionVerificationInput): string {
 }
 
 /** The committed answer as the comparison call sees it. */
-function committedAnswerOf(input: QuestionVerificationInput): string {
-	if (input.kind === "free") return input.correctAnswer;
-	return input.modelSolution;
+function committedAnswerOf(input: Exclude<QuestionVerificationInput, { kind: "choice" }>): string {
+	return input.kind === "free" ? input.correctAnswer : input.modelSolution;
 }
 
 /** Render the comparison prompt: the question, then A = the committed
  *  answer and B = the blind solver's answer, with no authority framing. */
-export function comparePrompt(input: QuestionVerificationInput, candidate: string): string {
+export function comparePrompt(
+	input: Exclude<QuestionVerificationInput, { kind: "choice" }>,
+	candidate: string,
+): string {
 	const question = input.kind === "problem" ? input.statement : input.question;
 	return JSON.stringify(
 		{
