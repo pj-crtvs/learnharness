@@ -14,7 +14,7 @@ import { LatexGlyph } from "../components/latex-glyph.tsx";
 import { ProblemCard, ConcludeCard } from "../components/practice-cards.tsx";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import {
-	repairMathForDisplay, healOverescapedCommands, restoreMathEscapes,
+	repairMathForDisplay, healOverescapedCommands, restoreMathEscapes, healLiteralEscapes,
 	parseQuizInput, parseAskInput, parseExplainInput, activeProblemOf, projectView,
 	toLlmMessages, type LhMessage, type ArtifactPartProps,
 } from "../src/core/index.ts";
@@ -76,6 +76,46 @@ describe("repairMathForDisplay — the existing composition, unchanged", () => {
 		assert.equal(repairMathForDisplay(quadrupled), clean);
 		assert.equal(repairMathForDisplay(debris), `$${repairedDebris}$`);
 		assert.equal(repairMathForDisplay(matrix), `$$\n${repairedMatrix}\n$$`);
+	});
+});
+
+describe("healLiteralEscapes — double-encoded provider payloads", () => {
+	it("restores literal newlines, tabs and quotes", () => {
+		const raw = "Under the default box model?\\n\\n```css\\n.box {\\n  width: 200px;\\n}\\n```\\n\\nA \\\"quote\\\"";
+		assert.equal(
+			healLiteralEscapes(raw),
+			"Under the default box model?\n\n```css\n.box {\n  width: 200px;\n}\n```\n\nA \"quote\"",
+		);
+	});
+
+	it("never eats LaTeX commands that start with n/r/t", () => {
+		const tex = String.raw`$\nabla f + \neq 0$ and \text{ok} \theta \to \rho`;
+		assert.equal(healLiteralEscapes(tex), tex);
+	});
+
+	it("leaves already-escaped prose backslashes alone and is idempotent", () => {
+		const raw = String.raw`keep \\n literal`;
+		assert.equal(healLiteralEscapes(raw), raw);
+		const once = healLiteralEscapes(String.raw`a\nb`);
+		assert.equal(healLiteralEscapes(once), once);
+	});
+
+	it("the question display parse heals the reported CSS payload end to end", () => {
+		const input = {
+			question: "Under the default box model, what is the total rendered **width**?\\n\\n```css\\n.box {\\n  width: 200px;\\n  padding: 0 10px;\\n  border: 5px solid black;\\n}\\n```",
+			correctAnswer: "250",
+			details: "Show your work.",
+			explanation: "Padding and border sit outside the content box.",
+			options: [
+				{ label: "200 px", value: "200" },
+				{ label: "250 px", value: "250" },
+			],
+			multiSelect: false,
+		};
+		const parsed = parseQuizInput(input);
+		assert.ok(parsed);
+		assert.ok(parsed.question.includes("```css\n.box {\n  width: 200px;"));
+		assert.ok(!parsed.question.includes("\\n"));
 	});
 });
 

@@ -34,7 +34,7 @@ import {
   type PluginConfig,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
-import { transformMathDelimiters } from "@/src/core";
+import { healLiteralEscapes, transformMathDelimiters } from "@/src/core";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: LhViewMessage["role"];
@@ -362,7 +362,7 @@ export const MessageResponse = memo(
     // legacy spans are left for a later render when their closer arrives.
     const content =
       typeof children === "string"
-        ? transformMathDelimiters(children)
+        ? transformMathDelimiters(healLiteralEscapes(children))
         : children;
 
     return (

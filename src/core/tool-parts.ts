@@ -30,7 +30,7 @@
 import { Value } from "typebox/value";
 import type { TSchema } from "typebox";
 import { quizDisplayInputSchema, askInputSchema, askOptionProblems, quizInputProblems, explainInputProblems, explainDisplayInputSchema, type AskToolInput, type QuizToolInput, type ExplainToolInput } from "./question-core.ts";
-import { repairMathForDisplay } from "./math-delims.ts";
+import { healLiteralEscapes, repairMathForDisplay } from "./math-delims.ts";
 import { healEncodedArguments } from "./argument-heal.ts";
 import { probeDoneInputSchema, type ProbeDoneInput } from "./contracts/probe.ts";
 
@@ -79,7 +79,11 @@ function boundaryParse<T>(schema: TSchema, input: unknown): T | undefined {
  *  plus "nabla" as letters), so even runs before a command start inside
  *  balanced math spans collapse to one backslash. */
 function restoreMathEscapesDeep(value: unknown): unknown {
-	if (typeof value === "string") return repairMathForDisplay(value);
+	if (typeof value === "string") {
+		// Literal `\n`/`\t`/`\"` first (double-encoded provider payloads),
+		// then the LaTeX debris heal — see healLiteralEscapes.
+		return repairMathForDisplay(healLiteralEscapes(value));
+	}
 	if (Array.isArray(value)) return value.map(restoreMathEscapesDeep);
 	if (typeof value === "object" && value !== null) {
 		const out: Record<string, unknown> = {};
@@ -99,8 +103,10 @@ export function parseQuizInput(input: unknown): QuizToolInput | undefined {
 	// record keeps RAW arguments, so the recorded `type: "\"predict\""`
 	// wobble must heal HERE too or a posed quiz renders invisible (the
 	// tool-parts law). healEncodedArguments is the same pure pass the
-	// boundary's withArgumentHeal runs.
-	const healedInput = healEncodedArguments(restoreMathEscapesDeep(input), quizDisplayInputSchema);
+	// boundary's withArgumentHeal runs. It runs FIRST: a JSON-encoded
+	// multi-select array must keep its `\"` escapes until JSON.parse turns
+	// it into the real array, then the display heal walks the strings.
+	const healedInput = restoreMathEscapesDeep(healEncodedArguments(input, quizDisplayInputSchema));
 	const cleaned = boundaryParse<QuizToolInput>(quizDisplayInputSchema, healedInput);
 	if (!cleaned) return undefined;
 	if (quizInputProblems(cleaned).length > 0) return undefined;

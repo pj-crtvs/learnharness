@@ -475,6 +475,41 @@ function restoreDollarMathEscapes(text: string): string {
 }
 
 /**
+ * Literal escape restoration (owner report 2026-10-27) — the double-encoded
+ * text fix.
+ *
+ * Some OpenAI-compatible providers double-encode tool arguments and message
+ * strings, so `\n`, `\r`, `\t`, and `\"` arrive as LITERAL backslash
+ * sequences and render on screen (the reported symptom: a quiz question is
+ * one long line containing `\n\n```css\n.box {\n ...`).
+ *
+ * Decode only escapes that CANNOT begin a LaTeX command: `\n` / `\r` / `\t`
+ * followed by an ASCII letter are left untouched (`\nabla`, `\neq`, `\nu`,
+ * `\text`, `\theta`, `\to`), and odd-backslash runs (`\\n`, already-escaped
+ * prose/code) are skipped. Quotes are safe to restore. Text with real
+ * newlines has no literal escapes left to match, so the pass is idempotent.
+ *
+ * Display-only, like repairMathForDisplay: the raw record stays byte-for-byte
+ * what the model emitted.
+ */
+export function healLiteralEscapes(text: string): string {
+	if (!text.includes("\\")) return text;
+	// A JSON-encoded array/object is a TRANSPORT container, not display text:
+	// its `\"` / `\n` escapes must survive until JSON.parse (the argument
+	// heal or the grader) turns it into real values. Healing them here would
+	// corrupt e.g. a stringified multi-select correctAnswer.
+	if (/^\s*[[{]/.test(text)) return text;
+	return text
+		.replace(/(?<!\\)(?:\\r\\n)+/g, (m) => "\n".repeat(m.length / 4))
+		.replace(/(?<!\\)(?:\\n){2,}/g, (m) => "\n".repeat(m.length / 2))
+		.replace(/(?<!\\)\\r\\n/g, "\n")
+		.replace(/(?<!\\)\\n(?![a-z])/g, "\n")
+		.replace(/(?<!\\)\\r(?![a-z])/g, "\n")
+		.replace(/(?<!\\)\\t(?![A-Za-z])/g, "\t")
+		.replace(/(?<!\\)\\"/g, '"');
+}
+
+/**
  * Over-escaped command heal (owner ruling 2026-10-15) — the doubled-
  * backslash fix.
  *

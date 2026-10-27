@@ -129,6 +129,26 @@ describe("keyless researcher loop", () => {
 		}), "Prompt verified; no model behavior inferred.");
 	});
 
+	it("forces a final synthesis when the turn budget ends on a tool call", async () => {
+		const steps: FauxResponseStep[] = Array.from({ length: 12 }, (_, i) => () =>
+			fauxAssistantMessage(
+				[fauxToolCall("web_search", { query: `angle ${i}` }, { id: `search${i}` })],
+				{ stopReason: "toolUse" },
+			),
+		);
+		steps.push(() =>
+			fauxAssistantMessage([
+				fauxText("## Summary\nSynthesized from the research already gathered."),
+			]),
+		);
+		const faux = createFauxCore({});
+		faux.setResponses(steps);
+		const brief = await runResearcherAgent("Research this exhaustively", {
+			engine: { model: faux.getModel(), streamFn: faux.streamSimple },
+		});
+		assert.match(brief, /Synthesized from the research already gathered/);
+	});
+
 	// These scripts prove tool/loop mechanics, not real-model compliance.
 	for (const searchFirst of [true, false]) {
 		it(searchFirst ? "recovers from missing search keys by fetching a supplied URL" : "fetch-only research needs no search credentials", async () => {

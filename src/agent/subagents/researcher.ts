@@ -94,7 +94,7 @@ export interface ResearcherRunOptions {
 export async function runResearcherAgent(prompt: string, opts: ResearcherRunOptions = {}): Promise<string> {
 	const tools = Object.values(createWebTools(opts.search ?? (() => null)));
 	if (opts.pdfDir) tools.push(...Object.values(createPdfReadTools(opts.pdfDir)));
-	const { text } = await runSubagent(tools, {
+	const { text, newMessages } = await runSubagent(tools, {
 		role: "researcher",
 		prompt,
 		engine: opts.engine,
@@ -105,7 +105,28 @@ export async function runResearcherAgent(prompt: string, opts: ResearcherRunOpti
 		onToolStart: opts.onToolStart,
 		chatId: opts.chatId,
 	});
-	return text;
+	if (text.trim()) return text;
+
+	// TURN-BUDGET BACKSTOP (owner report 2026-10-27: "Research failed: the
+	// researcher produced no text"). Weak/auto models sometimes spend every
+	// turn on searches and hit maxTurns with a tool call as their final
+	// message, so there is no deliverable text. Give them ONE tools-disabled
+	// synthesis turn over the research they already did — the work is not
+	// lost, and the teacher still receives a brief. If even that returns
+	// nothing, the honest failure still reaches the learner.
+	const synthesis = await runSubagent([], {
+		role: "researcher",
+		engine: opts.engine,
+		systemPrompt: INSTRUCTIONS,
+		messages: newMessages,
+		prompt:
+			"Stop researching now. Using only the research you have already gathered above, write your final brief in the required format (## Summary, ## Findings, ## Sources, ## Gaps). Do not call any tools.",
+		maxTurns: 1,
+		abortSignal: opts.abortSignal,
+		onUsage: opts.onUsage,
+		chatId: opts.chatId,
+	});
+	return synthesis.text;
 }
 
 export type ResearcherAgent = ReturnType<typeof runResearcherAgent>;

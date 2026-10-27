@@ -23,7 +23,7 @@ import {
 } from "react";
 import { Streamdown } from "streamdown";
 
-import { transformMathDelimiters } from "@/src/core";
+import { healLiteralEscapes, transformMathDelimiters } from "@/src/core";
 import { streamdownPlugins } from "./message";
 import { mdComponents } from "@/components/md-blocks";
 import { Shimmer } from "./shimmer";
@@ -210,7 +210,7 @@ export const ReasoningContent = memo(
       {...props}
     >
       <Streamdown components={mdComponents} plugins={streamdownPlugins}>
-        {transformMathDelimiters(children)}
+        {transformMathDelimiters(healLiteralEscapes(children))}
       </Streamdown>
     </CollapsibleContent>
   )

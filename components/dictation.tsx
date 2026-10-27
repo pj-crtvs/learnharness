@@ -10,9 +10,10 @@ import { Hint } from "@/components/ui/hint";
  *
  * Architecture (docs/research/stt.md): the renderer captures mic audio in
  * an AudioWorklet (public/worklets/pcm-capture.js → linear16 16kHz mono),
- * opens the Deepgram streaming WebSocket DIRECTLY (audio never loops
- * through our server) with a short-lived token minted by /api/stt/token
- * (the real key stays server-side), and streams frames while it listens.
+ * then streams frames over a WebSocket while it listens. Desktop builds
+ * connect to the local relay (electron/stt-relay.cjs) so the Deepgram key
+ * never reaches the renderer; dev builds without a relay fall back to
+ * Deepgram directly with a short-lived token minted by /api/stt/token.
  * Finals append into the PRIMARY INPUT (see below).
  *
  * Ported patterns from the owner's pi `dictate` extension (his words:
@@ -114,20 +115,34 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * it and deep-links Settings → Keys → the Deepgram row. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
 
-/** Mint a fresh short-lived token (the route holds the real key
+/** What /api/stt/token hands back: either a local-relay ticket (desktop,
+ *  raw key server-side) or a minted Deepgram JWT (dev / Member keys). */
+export type SttAuth = { url: string; token: string; mode: "relay" | "bearer" };
+
+/** Mint a fresh short-lived credential (the route holds the real key
  *  server-side). Module-level: the start path's warm cache and the
  *  reconnect path both bottom out here. The keyless 503 (no
  *  DEEPGRAM_API_KEY) is the route's ONLY 503 — the raw message is
  *  dev-speak, so the error becomes the short client-authored line
  *  (zero-keys wave, owner 2026-09-25). */
-async function mintFreshToken(): Promise<string> {
+async function mintFreshToken(): Promise<SttAuth> {
 	const res = await fetch("/api/stt/token");
-	const data = (await res.json()) as { token?: string; message?: string };
+	const data = (await res.json()) as {
+		token?: string;
+		url?: string;
+		relay?: boolean;
+		message?: string;
+	};
 	if (!res.ok || !data.token) {
 		if (res.status === 503) throw new Error(DICTATION_KEYLESS);
 		throw new Error(data.message ?? `token route ${res.status}`);
 	}
-	return data.token;
+	// Desktop: the URL points at the local relay; the ticket is not the
+	// Deepgram key. Dev/no relay: the historical minted-JWT direct path.
+	if (data.relay && data.url) {
+		return { url: data.url, token: data.token, mode: "relay" };
+	}
+	return { url: DG_URL, token: data.token, mode: "bearer" };
 }
 
 /** Warm-token cache (mitigation D, owner 2026-09-27): the click path takes
@@ -139,15 +154,15 @@ async function mintFreshToken(): Promise<string> {
  *  failures are silently tolerated (a keyless pre-mint just doesn't warm). */
 export const WARM_TOKEN_TTL_MS = 3 * 60_000;
 
-export type WarmMinter = { mint: () => Promise<string>; refresh: () => void };
+export type WarmMinter<T = SttAuth> = { mint: () => Promise<T>; refresh: () => void };
 
-export function createWarmMinter(
-	mint: () => Promise<string>,
+export function createWarmMinter<T = SttAuth>(
+	mint: () => Promise<T>,
 	now: () => number = Date.now,
 	ttlMs: number = WARM_TOKEN_TTL_MS,
-): WarmMinter {
-	let warm: { p: Promise<string>; at: number } | null = null;
-	const m: WarmMinter = {
+): WarmMinter<T> {
+	let warm: { p: Promise<T>; at: number } | null = null;
+	const m: WarmMinter<T> = {
 		mint: () => {
 			if (!warm || now() - warm.at > ttlMs) {
 				const p = mint().catch((e: unknown) => {
@@ -360,13 +375,17 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		warmTokens.refresh();
 	}, []);
 
-	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
+	/** Open the dictation socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
-		(gen: number, token: string) => {
-			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
-			// jwt] is rejected at the handshake (verified live; "token" is for
-			// raw API keys only, as in the owner's pi dictate extension).
-			const ws = new WebSocket(DG_URL, ["bearer", token]);
+		(gen: number, auth: SttAuth) => {
+			// Desktop: 127.0.0.1 relay (ticket in the query, key stays in main).
+			// Dev/Member keys: minted JWTs authenticate via the "bearer"
+			// subprotocol — ["token", jwt] is rejected at the handshake
+			// (verified live; "token" is for raw API keys only).
+			const ws =
+				auth.mode === "relay"
+					? new WebSocket(`${auth.url}?ticket=${encodeURIComponent(auth.token)}`)
+					: new WebSocket(auth.url, ["bearer", auth.token]);
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {
@@ -497,7 +516,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
-		let token: string;
+		let token: SttAuth;
 		try {
 			token = await tokenPromise;
 		} catch (e) {

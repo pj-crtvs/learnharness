@@ -28,6 +28,7 @@ const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("e
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
+const { startSttRelay } = require("./stt-relay.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -50,6 +51,19 @@ const PRODUCT_NAME = "LearnHarness";
 app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+
+/** The relay's key source. Read at every upgrade (not cached) so a key
+ *  replaced in Settings takes effect on the next dictation run. Mirrors
+ *  the server's rule: a real env var wins over the auth.json file. */
+function readDeepgramKey() {
+	if (process.env.DEEPGRAM_API_KEY) return process.env.DEEPGRAM_API_KEY;
+	try {
+		const parsed = JSON.parse(fs.readFileSync(AUTH_FILE(), "utf8"));
+		return typeof parsed.DEEPGRAM_API_KEY === "string" ? parsed.DEEPGRAM_API_KEY : "";
+	} catch {
+		return "";
+	}
+}
 
 /** The packaged standalone server (extraResources → Resources/server).
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
@@ -134,6 +148,7 @@ if (process.argv.includes("--browser-service")) {
 let serverProcess = null;
 let chatgpt = null;
 let chatgptChild = null;
+let sttRelay = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
 let desktopAPISecret = null;
 const trustedAppWindows = new Set();
@@ -212,6 +227,12 @@ function startServer(port) {
 					LH_AUTH_FILE: AUTH_FILE(),
 					LH_DESKTOP_SERVER: "1",
 					LH_DESKTOP_API_SECRET: desktopAPISecret,
+					// Local dictation relay (see electron/stt-relay.cjs). The
+					// renderer learns this URL+ticket from /api/stt/token; the
+					// raw Deepgram key never leaves this process.
+					...(sttRelay
+						? { LH_STT_RELAY_URL: sttRelay.url, LH_STT_RELAY_TICKET: sttRelay.ticket }
+						: {}),
 				},
 				stdio: ["ignore", "pipe", "pipe", "ipc"],
 			},
@@ -251,6 +272,8 @@ function waitUntilUp(url, tries = 150) {
 
 function killServer() {
 	chatgpt?.close();
+	sttRelay?.close();
+	sttRelay = null;
 	if (!serverProcess) return;
 	const child = serverProcess;
 	serverProcess = null;
@@ -603,6 +626,13 @@ async function main() {
 		});
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
+		// Dictation goes through the local relay: the key stays in this
+		// process, and keys that can transcribe but cannot mint still work.
+		sttRelay = await startSttRelay({
+			getKey: readDeepgramKey,
+			origin: new URL(url).origin,
+			log,
+		});
 		await startServer(new URL(url).port);
 		await waitUntilUp(url);
 		log(`server up: ${url}`);

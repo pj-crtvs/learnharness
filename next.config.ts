@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+	// Dev-server origin allowance (owner report 2026-10-27: the browser at
+	// 127.0.0.1 got 403 for every /_next/static chunk and HMR socket, so
+	// hydration never ran — the graph stayed empty and sessions said
+	// "Loading…"). Next 16 blocks cross-origin dev resources by default;
+	// the desktop dev shell and localhost/127.0.0.1 tabs are the same app.
+	allowedDevOrigins: ["localhost", "127.0.0.1"],
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).
