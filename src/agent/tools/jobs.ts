@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
+import { resolveSourcePath } from "./fs-shared.ts";
 import type { JobRecord } from "../../core/contracts.ts";
 import type { JobStore } from "../../core/ports.ts";
 
@@ -160,7 +161,13 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			label: "pdf",
 			description: PDF_DESCRIPTION,
 			parameters: pdfInputSchema,
-			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) => dispatch(ctx, "pdf", toolCallId, PDF_ACK, input)),
+			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) =>
+				// The learner speaks in paths like "Desktop/book.pdf" (and the
+				// schema promises relative works). Resolve them against the
+				// learner's HOME — the same anchor ls/find/grep use — so the
+				// reader never stats the server's install directory.
+				dispatch(ctx, "pdf", toolCallId, PDF_ACK, { ...input, path: resolveSourcePath(input.path) }),
+			),
 		},
 	};
 }
