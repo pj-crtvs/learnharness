@@ -25,7 +25,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { after, describe, it } from "node:test";
-import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseStep, type ToolCall, type Usage } from "@earendil-works/pi-ai";
+import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep, type ToolCall, type Usage } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { newPlanBlockMessage } from "../src/core/native-messages.ts";
@@ -58,7 +58,7 @@ import {
 } from "../src/agent/subagents/extraction.ts";
 import { getGraph, simplifyChains } from "../src/core/graph.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError, providerKeyMissing, type ModelSlotName } from "../src/core/settings.ts";
-import { coverageOf, coverageSlots, messageViewLines } from "../src/core/coverage.ts";
+import { chatCoverageOf, coverageOf, coverageSlots, messageViewLines } from "../src/core/coverage.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { subscribe } from "../src/core/events.ts";
 import { PATHS } from "../config.ts";
@@ -2520,5 +2520,86 @@ describe("notes import completion and retry reliability", () => {
 		assert.equal(ledgers.readSources().length, 1);
 		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
 		assert.equal(ledgers.readNodes().length, 2);
+	});
+});
+
+describe("question-content fallback in the pipeline (owner, 2026-10-27)", () => {
+	const QUESTION = {
+		question: "Under the default box model, what is the rendered width of `.box { width: 200px; padding: 0 10px; border: 5px solid black; }`?",
+		options: [
+			{ label: "200 px", value: "200" },
+			{ label: "230 px", value: "230" },
+			{ label: "250 px", value: "250" },
+		],
+		explanation: "content + left/right padding + left/right border = 200 + 20 + 10 = 230",
+		correctAnswer: "230",
+	};
+
+	function toolOnlyChat() {
+		const chat = chatStore.createChat("Tool-only fixture");
+		createdChats.push(chat.id);
+		chatStore.saveMessages(chat.id, [
+			user("u1", "teach me the box model"),
+			...assistant("a1", [
+				{ name: "quiz", toolCallId: "q-1", input: QUESTION, output: {} },
+			]),
+		]);
+		return { chatId: chat.id, record: chatStore.getChat(chat.id)! };
+	}
+
+	const FINDINGS = {
+		propositions: [
+			{
+				id: "p1",
+				name: "Box model width",
+				statement: "In the default content-box model, the rendered width is content plus left/right padding plus left/right border.",
+				aliases: [],
+				messageId: "a1",
+			},
+		],
+		chains: [],
+	};
+
+	function verifier(reply: unknown): PiEngine {
+		return fauxEngine([fauxAssistantMessage([fauxText(JSON.stringify(reply))])]);
+	}
+
+	it("extracts verified question content from a prose-less chat and covers it", async () => {
+		const { chatId } = toolOnlyChat();
+		const ledgers = memoryLedgers();
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: submitModel("submit_findings", FINDINGS),
+			auditor: submitModel("submit_review", { links: [] } satisfies AuditVerdicts),
+			questionVerifier: verifier({ verdict: "agree", correct: ["230"], reason: "the declared width is right" }),
+		});
+
+		assert.equal(coverageOf(chatStore.getChat(chatId)!.messages, [], chatId).uncoveredCount, 0, "prose view sees nothing");
+		const stats = await pipeline.runExtraction(chatId);
+		assert.equal(stats.nodes, 1);
+		assert.equal(ledgers.readNodes()[0]!.name, "Box model width");
+		const after = chatCoverageOf(chatStore.getChat(chatId)!.messages, ledgers.readCoverage(), chatId);
+		assert.equal(after.uncoveredCount, 0, "the question slot is checkpointed");
+	});
+
+	it("skips a disputed historical question, checkpoints it, and extracts nothing", async () => {
+		const { chatId } = toolOnlyChat();
+		const ledgers = memoryLedgers();
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: fauxEngine([() => {
+				throw new Error("disputed question must never reach the extractor");
+			}]),
+			auditor: submitModel("submit_review", { links: [] } satisfies AuditVerdicts),
+			questionVerifier: verifier({ verdict: "disagree", correct: ["230"], reason: "the committed answer is 250, which double-counts padding" }),
+		});
+
+		const stats = await pipeline.runExtraction(chatId);
+		assert.equal(stats.nodes, 0);
+		assert.equal(ledgers.readNodes().length, 0);
+		const after = chatCoverageOf(chatStore.getChat(chatId)!.messages, ledgers.readCoverage(), chatId);
+		assert.equal(after.uncoveredCount, 0, "a skipped question is checkpointed, never retried forever");
 	});
 });

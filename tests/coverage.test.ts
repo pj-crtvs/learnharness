@@ -8,10 +8,14 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import {
 	batchRuns,
 	batchTag,
+	chatCoverageOf,
 	coverageOf,
 	coverageSlots,
 	messageFingerprint,
 	messageViewLines,
+	questionCoverageOf,
+	questionFingerprint,
+	questionViewLines,
 	teacherProseBlocks,
 } from "../src/core/coverage.ts";
 import type { CoverageEntry } from "../src/core/contracts/graph.ts";
@@ -235,6 +239,78 @@ describe("batchTag — deterministic, ref-stable, mutation-sensitive", () => {
 		const slots = coverageSlots([teacher("m1", "aaaa"), teacher("m2", "bbbb")]);
 		const mutated = coverageSlots([teacher("m1", "aaaa!"), teacher("m2", "bbbb")]);
 		assert.notEqual(batchTag(slots), batchTag(mutated));
+	});
+});
+
+describe("question-content fallback — tool-only chats enter coverage (owner, 2026-10-27)", () => {
+	const QUIZ_ARGS = {
+		question: "Under the default box model, what is the rendered width?",
+		options: [
+			{ label: "200 px", value: "200" },
+			{ label: "230 px", value: "230" },
+			{ label: "250 px", value: "250" },
+		],
+		explanation: "content + left/right padding + left/right border = 200 + 20 + 10 = 230",
+		correctAnswer: "230",
+	};
+	const toolOnly = (args: unknown = QUIZ_ARGS) =>
+		assistantWithCalls("q1", [{ id: "c1", name: "quiz", args }]);
+
+	it("a prose-less graded message gets a question slot; the prose view stays empty", () => {
+		const messages = [toolOnly()];
+		assert.equal(messageViewLines(messages[0]!, "q1").length, 0, "no teacher prose");
+		const lines = questionViewLines(messages[0]!, "q1");
+		assert.equal(lines.length, 3);
+		assert.match(lines[0]!, /TEACHER QUESTION \[q1\]/);
+		assert.match(lines[1]!, /230 px/);
+		assert.match(lines[2]!, /WHY:/);
+
+		const prose = coverageOf(messages, [], "c1");
+		assert.equal(prose.uncoveredCount, 0, "the prose ruling sees nothing to extract");
+
+		const fallback = questionCoverageOf(messages, [], "c1");
+		assert.equal(fallback.uncoveredCount, 1);
+		assert.ok(fallback.uncoveredTokens > 0);
+	});
+
+	it("chatCoverageOf picks the fallback only when the chat has zero prose", () => {
+		const proseChat = [teacher("t1", "A real lesson in prose."), toolOnly()];
+		assert.equal(chatCoverageOf(proseChat, [], "c1").slots[0]!.view, "prose");
+		assert.equal(chatCoverageOf(proseChat, [], "c1").uncoveredCount, 1, "the tool-only message stays invisible in a prose chat");
+
+		const toolChat = [user("u1", "teach me CSS"), toolOnly()];
+		const cov = chatCoverageOf(toolChat, [], "c1");
+		assert.equal(cov.uncoveredCount, 1);
+		assert.equal(cov.slots.length, 1, "the fallback channel carries only knowledge-bearing question slots");
+		assert.equal(cov.slots[0]!.message.id, "q1");
+		assert.equal(cov.slots[0]!.view, "question");
+	});
+
+	it("structurally invalid calls never enter the fallback", () => {
+		const invalid = toolOnly({ ...QUIZ_ARGS, correctAnswer: "not-an-option" });
+		assert.equal(questionViewLines(invalid, "q1").length, 0);
+		assert.equal(questionCoverageOf([invalid], [], "c1").uncoveredCount, 0);
+	});
+
+	it("the question fingerprint is namespaced and content-sensitive", () => {
+		const a = questionFingerprint(toolOnly());
+		const same = questionFingerprint(toolOnly());
+		const changed = questionFingerprint(toolOnly({ ...QUIZ_ARGS, explanation: "different reasoning" }));
+		assert.equal(a, same);
+		assert.notEqual(a, changed);
+		assert.notEqual(a, messageFingerprint(toolOnly()), "question and prose channels never alias");
+	});
+
+	it("the ledger covers question slots independently of prose slots", () => {
+		const messages = [toolOnly()];
+		const entry: CoverageEntry = {
+			chatId: "c1",
+			fp: questionFingerprint(messages[0]!),
+			tokens: 1,
+			foldedAt: new Date().toISOString(),
+		};
+		assert.equal(questionCoverageOf(messages, [entry], "c1").uncoveredCount, 0);
+		assert.equal(coverageOf(messages, [entry], "c1").uncoveredCount, 0);
 	});
 });
 

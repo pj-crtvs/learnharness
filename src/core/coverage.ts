@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 
 import type { CoverageEntry } from "./contracts/graph.ts";
 import type { LhMessage } from "./native-messages.ts";
+import { gradedQuestionContent } from "./question-content.ts";
 
 export type { CoverageEntry };
 
@@ -52,6 +53,45 @@ export function messageViewLines(message: LhMessage, mid: string): string[] {
 		lines.push(`TEACHER [${mid}] ${text.trim()}`);
 	}
 	return lines;
+}
+
+// ─── the question-content view (tool-only chats, owner 2026-10-27) ──────────
+//
+// Some lessons are taught entirely through graded question calls — the
+// teacher's text blocks are empty, so the prose-only view has nothing to
+// extract and the chat never enters the graph. The fallback view below gives
+// those messages a knowledge-bearing face: the question, the teacher's
+// committed answer, and the explanation. It is used ONLY for chats with zero
+// teacher prose (chatCoverageOf); prose chats keep the 2026-09-28 ruling
+// byte-for-byte.
+//
+// Only STRUCTURALLY VALID graded calls enter the view. Rejected calls (the
+// model retried them) are not knowledge. Semantic validation happens in the
+// extraction pipeline before this view is sent — see extraction.ts.
+
+/**
+ * The question-content lines of a prose-less message. Returns [] when the
+ * message carries teacher prose (those chats use the prose view) or no valid
+ * graded call. Same shape as messageViewLines: one string per extractable
+ * passage, labelled with the message id.
+ */
+export function questionViewLines(message: LhMessage, mid: string): string[] {
+	if (messageViewLines(message, mid).length > 0) return [];
+	const lines: string[] = [];
+	for (const content of gradedQuestionContent(message)) {
+		lines.push(`TEACHER QUESTION [${mid}] ${content.question}`);
+		lines.push(`ANSWER: ${content.correctLabels.join("; ")}`);
+		if (content.explanation) lines.push(`WHY: ${content.explanation}`);
+	}
+	return lines;
+}
+
+/** The question-content fingerprint: distinct namespace from the prose
+ *  fingerprint (a message may have both views, and they must never collide). */
+export function questionFingerprint(message: LhMessage): string {
+	const h = createHash("sha256");
+	h.update(JSON.stringify(["question", (message as { role?: string }).role, questionViewLines(message, message.id)]));
+	return h.digest("hex");
 }
 
 /**
@@ -85,17 +125,42 @@ export function messageFingerprint(message: LhMessage): string {
 	return h.digest("hex");
 }
 
-/** One message's coverage-relevant projection. */
+/** One message's coverage-relevant projection. `view` distinguishes the
+ *  prose channel from the question-content fallback; `lines` is the exact
+ *  view the extractor receives (empty = invisible to coverage). */
 export interface CoverageSlot {
 	message: LhMessage;
 	fp: string;
 	tokens: number;
+	view: "prose" | "question";
+	lines: string[];
 }
 
 /** Fingerprint a whole transcript, in order (used by the trigger, the run,
  *  and the coverage view — one derivation everywhere). */
 export function coverageSlots(messages: ReadonlyArray<LhMessage>): CoverageSlot[] {
-	return messages.map((message) => ({ message, fp: messageFingerprint(message), tokens: viewTokens(messageViewLines(message, message.id)) }));
+	return messages.map((message) => {
+		const lines = messageViewLines(message, message.id);
+		return { message, fp: messageFingerprint(message), tokens: viewTokens(lines), view: "prose" as const, lines };
+	});
+}
+
+/** The question-content fallback slots (only prose-less messages with a valid
+ *  graded call). */
+export function questionCoverageSlots(messages: ReadonlyArray<LhMessage>): CoverageSlot[] {
+	const out: CoverageSlot[] = [];
+	for (const message of messages) {
+		const lines = questionViewLines(message, message.id);
+		if (lines.length === 0) continue;
+		out.push({
+			message,
+			fp: questionFingerprint(message),
+			tokens: viewTokens(lines),
+			view: "question",
+			lines,
+		});
+	}
+	return out;
 }
 
 /** The covered-fingerprint set for one chat, from the ledger. */
@@ -116,31 +181,45 @@ export function coverageOf(
 	messages: ReadonlyArray<LhMessage>,
 	entries: ReadonlyArray<CoverageEntry>,
 	chatId: string,
-): {
+): CoverageOf {
+	return coverageOfSlots(coverageSlots(messages), entries, chatId);
+}
+
+/** The question-content fallback, diffed against the SAME per-chat ledger
+ *  (fingerprints are namespaced, so prose and question coverage can never
+ *  alias each other). */
+export function questionCoverageOf(
+	messages: ReadonlyArray<LhMessage>,
+	entries: ReadonlyArray<CoverageEntry>,
+	chatId: string,
+): CoverageOf {
+	return coverageOfSlots(questionCoverageSlots(messages), entries, chatId);
+}
+
+export interface CoverageOf {
 	slots: CoverageSlot[];
 	uncovered: number[];
 	coveredTokens: number;
 	uncoveredTokens: number;
 	coveredCount: number;
 	uncoveredCount: number;
-} {
+}
+
+function coverageOfSlots(slots: CoverageSlot[], entries: ReadonlyArray<CoverageEntry>, chatId: string): CoverageOf {
 	const covered = coveredSet(entries, chatId);
-	const slots = coverageSlots(messages);
 	const uncovered: number[] = [];
 	let coveredTokens = 0;
 	let uncoveredTokens = 0;
 	for (let i = 0; i < slots.length; i++) {
 		const slot = slots[i]!;
-		if (messageViewLines(slot.message, slot.message.id).length === 0) continue; // invisible
+		if (slot.lines.length === 0) continue; // invisible
 		if (covered.has(slot.fp)) coveredTokens += slot.tokens;
 		else {
 			uncovered.push(i);
 			uncoveredTokens += slot.tokens;
 		}
 	}
-	const visibleCount = slots.length - slots.filter(
-		(s) => messageViewLines(s.message, s.message.id).length === 0,
-	).length;
+	const visibleCount = slots.filter((s) => s.lines.length > 0).length;
 	return {
 		slots,
 		uncovered,
@@ -149,6 +228,23 @@ export function coverageOf(
 		coveredCount: visibleCount - uncovered.length,
 		uncoveredCount: uncovered.length,
 	};
+}
+
+/**
+ * THE PER-CHAT DERIVATION (owner, 2026-10-27): a chat with ANY teacher prose
+ * uses the prose channel exactly as before; a chat with NO prose (a lesson
+ * taught entirely through graded question calls) falls back to the
+ * question-content channel. The two channels never mix, so the prose ruling
+ * survives untouched for normal lessons.
+ */
+export function chatCoverageOf(
+	messages: ReadonlyArray<LhMessage>,
+	entries: ReadonlyArray<CoverageEntry>,
+	chatId: string,
+): CoverageOf {
+	const prose = coverageOf(messages, entries, chatId);
+	if (prose.slots.some((slot) => slot.view === "prose" && slot.lines.length > 0)) return prose;
+	return questionCoverageOf(messages, entries, chatId);
 }
 
 /**

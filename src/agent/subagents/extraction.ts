@@ -27,7 +27,15 @@ import { getGraph, mergeFindings, type DerivedGraph, type EmissionStats, type Gr
 import type { GraphStore } from "../../core/ports.ts";
 import { emit } from "../../core/events.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
-import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts";
+import {
+	batchRuns,
+	chatCoverageOf,
+	messageViewLines,
+	questionViewLines,
+	type CoverageSlot,
+} from "../../core/coverage.ts";
+import { gradedQuestionContent } from "../../core/question-content.ts";
+import { createQuestionVerifier, verificationInputFromContent } from "../question-verify.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
@@ -134,6 +142,15 @@ export function transcriptView(record: ChatRecord): string {
  *  future user-facing export. */
 function proseView(messages: ReadonlyArray<LhMessage>, title?: string): string {
 	const lines = messages.flatMap((message) => messageViewLines(message, message.id));
+	const head = title && title.length > 0 ? `# ${title}\n\n` : "";
+	return head + lines.join("\n\n");
+}
+
+/** The question-content view for tool-only chats (owner, 2026-10-27): the
+ *  fallback face of a lesson taught entirely through graded question calls.
+ *  Used only when chatCoverageOf selected the question channel. */
+function questionView(messages: ReadonlyArray<LhMessage>, title?: string): string {
+	const lines = messages.flatMap((message) => questionViewLines(message, message.id));
 	const head = title && title.length > 0 ? `# ${title}\n\n` : "";
 	return head + lines.join("\n\n");
 }
@@ -708,6 +725,11 @@ export interface ExtractionModels {
 	 *  engineFor chain (production wires no direct values). */
 	extractor?: PiEngine;
 	auditor?: PiEngine;
+	/** Test seam for the question-content fallback's independent correctness
+	 *  check. Production resolves the teacher engine through `engineFor`;
+	 *  absent in tests means question fallback is skipped (never extracted
+	 *  unverified). */
+	questionVerifier?: PiEngine;
 	/** Settings-resolved engine per role — the same slot treatment the
 	 *  job runner got, read FRESH per stage call (a settings PUT between
 	 *  stages lands). BYOK (owner, 2026-09-22): the chain (role override →
@@ -1112,7 +1134,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// engines AND their providers' keys; a refusal lands BEFORE any
 			// stage runs (typed — the trigger skips, routes surface 503).
 			refuseIfStagesUnready();
-			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
+			const covered = chatCoverageOf(record.messages, graphStore.readCoverage(), chatId);
 			if (covered.uncovered.length === 0) {
 				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
 				return { nodes: 0, chains: 0 };
@@ -1142,20 +1164,79 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 					settled.push({
 						status: "fulfilled",
 						value: await runJob({ id: chatId, kind: "chat", part }, async (jobKey) => {
-							// The batch's source view: TEACHER PROSE ONLY (owner,
-							// 2026-09-28), each passage labeled with its ACTUAL message
-							// id (2026-10-13) — the view lines ARE the coverage
-							// fingerprints' messageViewLines ("TEACHER [id] text"), one
-							// shared seam.
-							const messages = batch.map((slot) => slot.message);
-							const view = proseView(messages, record.title);
-							// The batch's teacher-prose ids — the ONLY anchors this
-							// job's submit may name (validateSessionAnchors at the
-							// submit seam refuses anything else: ids from other
-							// batches — even real ones of this chat — other chats,
-							// and non-prose messages).
+							// The question fallback and the prose channel are
+							// exclusive per chat (chatCoverageOf); the batch's own
+							// view tells us which face the extractor receives.
+							const fallback = batch.some((slot) => slot.view === "question" && slot.lines.length > 0);
+							// THE QUESTION GATE (owner, 2026-10-27): historical
+							// question content is verified before it can become
+							// graph knowledge. A question the verifier disputes is
+							// skipped AND checkpointed (so it never retries forever);
+							// only verified content reaches the extractor.
+							let activeBatch = batch;
+							if (fallback) {
+								const engine = deps.questionVerifier ?? deps.engineFor?.("teacher");
+								if (!engine) {
+									console.info(
+										`[extraction ${jobKey}] question fallback skipped — no teacher engine for verification`,
+									);
+									activeBatch = [];
+								} else {
+									const verifier = createQuestionVerifier(engine);
+									const signal = runningExtractions.get(jobKey)?.controller.signal;
+									const accepted: CoverageSlot[] = [];
+									const skipped: CoverageSlot[] = [];
+									for (const slot of batch) {
+										const contents = gradedQuestionContent(slot.message);
+										let ok = contents.length > 0;
+										let reason = "";
+										for (const content of contents) {
+											const verdict = await verifier.verify(verificationInputFromContent(content), { signal });
+											if (!verdict.ok) {
+												ok = false;
+												reason = verdict.problems[0] ?? "";
+												break;
+											}
+										}
+										if (ok) accepted.push(slot);
+										else {
+											skipped.push(slot);
+											console.info(
+												`[extraction ${jobKey}] question not extracted (${slot.message.id}): ${reason}`,
+											);
+										}
+									}
+									if (skipped.length > 0) {
+										const foldedAt = new Date().toISOString();
+										for (const slot of skipped) {
+											graphStore.appendCoverage({
+												chatId,
+												fp: slot.fp,
+												tokens: slot.tokens,
+												foldedAt,
+											});
+										}
+										console.info(
+											`[extraction ${jobKey}] skipped ${skipped.length} question message(s) that failed verification`,
+										);
+									}
+									activeBatch = accepted;
+								}
+							}
+							if (activeBatch.length === 0) return { nodes: 0, chains: 0 };
+							// The batch's source view (owner, 2026-09-28 + 2026-10-27):
+							// teacher prose, or the verified question face for
+							// tool-only chats, each passage labeled with its ACTUAL
+							// message id.
+							const messages = activeBatch.map((slot) => slot.message);
+							const view = fallback ? questionView(messages, record.title) : proseView(messages, record.title);
+							// The batch's source ids — the ONLY anchors this job's
+							// submit may name (validateSessionAnchors at the submit
+							// seam refuses anything else: ids from other batches —
+							// even real ones of this chat — other chats, and
+							// invisible messages).
 							const batchIds = new Set(
-								messages.filter((m) => messageViewLines(m, m.id).length > 0).map((m) => m.id),
+								activeBatch.filter((slot) => slot.lines.length > 0).map((slot) => slot.message.id),
 							);
 							setPhase(jobKey, "queued", "chat", undefined, part);
 							const findings = await withExtractSlot(jobKey, async () => {
@@ -1187,8 +1268,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								const foldedAt = new Date().toISOString();
 								const batchStats = mergeFindings(chatId, findings, auditResult, { chatStore, graphStore }, {
 									foldedAt,
-									coverage: batch
-										.filter((slot) => messageViewLines(slot.message, slot.message.id).length > 0)
+									coverage: activeBatch
+										.filter((slot) => slot.lines.length > 0)
 										.map((slot) => ({ chatId, fp: slot.fp, tokens: slot.tokens, foldedAt })),
 								});
 								// The layout ledger evolves with the merge (sync — the

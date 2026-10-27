@@ -120,15 +120,56 @@ function listChats(): ChatSummary[] {
 	}
 }
 
+/** Duplicate-id guard (owner, 2026-10-27): steer delivery can race a live
+ *  injection against a wake append, landing the same deterministic marker id
+ *  more than once. Record identity is the id — keep the FIRST occurrence and
+ *  drop later copies, preserving order. */
+function dedupeMessages(messages: ReadonlyArray<LhMessage>): { messages: LhMessage[]; removed: number } {
+	const seen = new Set<string>();
+	const out: LhMessage[] = [];
+	for (const message of messages) {
+		const id = (message as { id?: unknown }).id;
+		if (typeof id === "string" && id.length > 0) {
+			if (seen.has(id)) continue;
+			seen.add(id);
+		}
+		out.push(message);
+	}
+	return { messages: out, removed: messages.length - out.length };
+}
+
 /** Persist the full native message list (the record IS the agent state —
  *  Wave B: replay is state.messages = record.messages). SILENT by the
  *  events law — see the SILENCE LAW comment at createChat. */
 function saveMessages(id: string, messages: LhMessage[]): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.messages = messages;
+	record.messages = dedupeMessages(messages).messages;
 	record.updatedAt = new Date().toISOString();
 	writeChat(record);
+}
+
+/** One-time boot sweep for records written before the dedupe guard: rewrite
+ *  only the chats that actually carry duplicate ids. Idempotent; skipped
+ *  under tests (scripted fixtures are not user data). */
+export function dedupeChatRecords(): void {
+	if (process.env.NODE_ENV === "test") return;
+	let files: string[];
+	try {
+		files = fs.readdirSync(PATHS.chats).filter((f) => f.endsWith(".json"));
+	} catch {
+		return;
+	}
+	for (const file of files) {
+		const id = file.slice(0, -5);
+		const record = getChat(id);
+		if (!record || !Array.isArray(record.messages)) continue;
+		const { messages, removed } = dedupeMessages(record.messages);
+		if (removed === 0) continue;
+		record.messages = messages;
+		writeChat(record);
+		console.info(`[chat ${id}] removed ${removed} duplicate message(s)`);
+	}
 }
 
 /** Append one usage entry to the record's turn log — idempotent per

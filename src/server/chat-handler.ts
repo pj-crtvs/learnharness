@@ -29,6 +29,7 @@ import {
 import { runPiTurn } from "./pi/ui-stream.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
+import { createQuestionVerifier, type QuestionVerifier } from "../agent/question-verify.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
@@ -351,6 +352,13 @@ export async function handleChatInput(
 	// engine build is pure from here; thinking levels clamp natively.
 	// (Built once above the compaction gate; reused verbatim.)
 	const engine = conversationEngine;
+	// THE CORRECTNESS GATE (owner, 2026-10-27): every graded question is
+	// solved independently by the turn's own model BEFORE it is posed.
+	// Verification tokens ride the same money channel as the turn.
+	const verifier = createQuestionVerifier(engine);
+	const verifyQuestion: QuestionVerifier = {
+		verify: (input, opts) => verifier.verify(input, { ...opts, onUsage: collectUsage }),
+	};
 	// Provider-qualified stamp (model slots wave): matches the price table's
 	// provider:id keys.
 	const modelId = `${engine.model.provider}:${engine.model.id}`;
@@ -399,6 +407,7 @@ export async function handleChatInput(
 					{
 						chatId,
 						chatStore: stores.chatStore,
+						verifyQuestion,
 						// TARGET VALIDATION (owner round 9): the practice tools read the
 						// WHOLE graph fresh per pose — targets validate against every
 						// proposition, not just the session's picks (pickless sessions
@@ -425,6 +434,7 @@ export async function handleChatInput(
 						chatStore: stores.chatStore,
 						jobStore: stores.jobStore,
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						verifyQuestion,
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
@@ -441,6 +451,7 @@ export async function handleChatInput(
 						// needs the same job wiring as the teacher's.
 						jobStore: stores.jobStore,
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						verifyQuestion,
 						searchAvailable,
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —

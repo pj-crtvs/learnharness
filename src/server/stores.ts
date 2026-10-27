@@ -6,11 +6,17 @@
  * file (and the adapter implementations in src/store/).
  */
 
-import { chatStore } from "../store/chats.ts";
+import { chatStore, dedupeChatRecords } from "../store/chats.ts";
 import { graphStore } from "../store/graph.ts";
 import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
+
+// One-time record hygiene (owner, 2026-10-27): duplicate-id messages from the
+// old steer race are removed before any route reads a chat. Idempotent and
+// skipped under tests.
+dedupeChatRecords();
+
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
 	chatStore,

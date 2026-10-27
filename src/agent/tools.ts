@@ -15,6 +15,7 @@ import {
 import { filterEnabledTools, type EnabledTools } from "../core/pending.ts";
 import type { JobRecord } from "../core/contracts.ts";
 import type { JobStore } from "../core/ports.ts";
+import type { QuestionVerifier } from "./question-verify.ts";
 import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
 import { planTools, type PlanToolContext } from "./tools/plan.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
@@ -216,10 +217,38 @@ export const probeQuizTool: AgentTool<typeof probeQuizInputSchema> = {
 	},
 };
 
+/** The prober's quiz with the independent correctness gate (the production
+ *  registry uses this factory; the bare constant above stays verifier-free
+ *  for tests and bare agents). */
+export function probeQuizToolFor(ctx: { verifyQuestion?: QuestionVerifier }): AgentTool<typeof probeQuizInputSchema> {
+	if (!ctx.verifyQuestion) return probeQuizTool;
+	return {
+		...probeQuizTool,
+		execute: async (_toolCallId, input, signal) => {
+			const problems = quizInputProblems(input);
+			if (problems.length > 0) return invalidInputResult("probe", problems);
+			const verdict = await ctx.verifyQuestion!.verify(
+				{
+					kind: "choice",
+					question: input.question,
+					options: input.options,
+					correctAnswer: input.correctAnswer,
+					multiSelect: input.multiSelect,
+					explanation: input.explanation,
+					details: input.details,
+				},
+				{ signal },
+			);
+			if (!verdict.ok) return invalidInputResult("probe", verdict.problems);
+			return questionResult();
+		},
+	};
+}
+
 /** The teacher's free-recall variant (nodeId-validated, same seam as the
  *  teach quiz — phases/plan recognize BOTH tool names). */
 export function teachExplainToolFor(
-	ctx: Pick<PlanToolContext, "chatId" | "chatStore">,
+	ctx: Pick<PlanToolContext, "chatId" | "chatStore"> & { verifyQuestion?: QuestionVerifier },
 ): AgentTool<typeof explainInputObject> {
 	return {
 		name: "explain",
@@ -228,11 +257,23 @@ export function teachExplainToolFor(
 		parameters: explainInputObject,
 		prepareArguments: prepareQuestionArguments,
 		executionMode: "sequential",
-		execute: async (_toolCallId, input) => {
+		execute: async (_toolCallId, input, signal) => {
 			const problems = [...explainInputProblems(input)];
 			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
 			if (nodeIdProblemText) problems.push(nodeIdProblemText);
 			if (problems.length > 0) return invalidInputResult("explain", problems);
+			if (ctx.verifyQuestion) {
+				const verdict = await ctx.verifyQuestion.verify(
+					{
+						kind: "free",
+						question: input.question,
+						correctAnswer: input.correctAnswer,
+						details: input.details,
+					},
+					{ signal },
+				);
+				if (!verdict.ok) return invalidInputResult("explain", verdict.problems);
+			}
 			return questionResult();
 		},
 	};
@@ -260,6 +301,33 @@ export const probeExplainTool: AgentTool<typeof explainInputBase> = {
 	},
 };
 
+/** The prober's free-recall tool with the independent correctness gate (the
+ *  production registry uses this factory; the bare constant above stays
+ *  verifier-free for tests and bare agents). */
+export function probeExplainToolFor(ctx: {
+	verifyQuestion?: QuestionVerifier;
+}): AgentTool<typeof explainInputBase> {
+	if (!ctx.verifyQuestion) return probeExplainTool;
+	return {
+		...probeExplainTool,
+		execute: async (_toolCallId, input, signal) => {
+			const problems = explainInputProblems(input);
+			if (problems.length > 0) return invalidInputResult("recall", problems);
+			const verdict = await ctx.verifyQuestion!.verify(
+				{
+					kind: "free",
+					question: input.question,
+					correctAnswer: input.correctAnswer,
+					details: input.details,
+				},
+				{ signal },
+			);
+			if (!verdict.ok) return invalidInputResult("recall", verdict.problems);
+			return questionResult();
+		},
+	};
+}
+
 /** The prober's registry context: the probe's own needs (probe_done —
  *  ProbeDoneContext) PLUS the job-dispatch wiring, since the owner ruling
  *  (2026-09-20) puts research + pdf in the probe phase's registry too. */
@@ -276,6 +344,9 @@ export interface ProberToolContext extends ProbeDoneContext {
 	 *  master switch AND the agent.graphTools toggle (settings-resolution).
 	 *  Absent = the gate is closed, no map tools (tests drive this seam). */
 	graphStore?: GraphStore;
+	/** The independent correctness gate (2026-10-27): absent in tests and
+	 *  bare agents; the composition root always wires it in production. */
+	verifyQuestion?: QuestionVerifier;
 }
 
 /** The prober's tool set: probe quiz (no nodeId) + ask + the learner-fs
@@ -310,7 +381,9 @@ export function createProberTools(
 	// differently-typed literals makes the whole object's type a union —
 	// unusable as Record<string, AgentTool<any>> downstream).
 	const quizzing: Record<string, AgentTool<any>> =
-		mechanics === "free" ? { recall: probeExplainTool } : { probe: probeQuizTool };
+		mechanics === "free"
+			? { recall: probeExplainToolFor(ctx) }
+			: { probe: probeQuizToolFor(ctx) };
 	// healToolRecord (owner, 2026-10-09 — the whitehead generalization):
 	// the standard argument heal over the WHOLE registry — every tool,
 	// not just the one the latest wobble incident landed on.
@@ -372,7 +445,9 @@ function nodeIdProblem(ctx: Pick<PlanToolContext, "chatId" | "chatStore">, nodeI
  *  nodeId is REQUIRED (owner ruling 2026-09-26): the untagged ad-hoc quiz is
  *  gone — off-map checks route through ask_user_question, and the teach
  *  seam (first tagged quiz) is structurally guaranteed. */
-export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStore">): AgentTool<typeof quizInputObject> {
+export function teachQuizToolFor(
+	ctx: Pick<PlanToolContext, "chatId" | "chatStore"> & { verifyQuestion?: QuestionVerifier },
+): AgentTool<typeof quizInputObject> {
 	return {
 		name: "quiz",
 		label: "quiz",
@@ -380,17 +455,35 @@ export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStor
 		parameters: quizInputObject,
 		prepareArguments: prepareQuestionArguments,
 		executionMode: "sequential",
-		execute: async (_toolCallId, input) => {
+		execute: async (_toolCallId, input, signal) => {
 			const problems = [...quizInputProblems(input)];
 			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
 			if (nodeIdProblemText) problems.push(nodeIdProblemText);
 			if (problems.length > 0) return invalidInputResult("quiz", problems);
+			if (ctx.verifyQuestion) {
+				const verdict = await ctx.verifyQuestion.verify(
+					{
+						kind: "choice",
+						question: input.question,
+						options: input.options,
+						correctAnswer: input.correctAnswer,
+						multiSelect: input.multiSelect,
+						explanation: input.explanation,
+						details: input.details,
+					},
+					{ signal },
+				);
+				if (!verdict.ok) return invalidInputResult("quiz", verdict.problems);
+			}
 			return questionResult();
 		},
 	};
 }
 
 export interface TeacherToolContext extends PlanToolContext {
+	/** The independent correctness gate (2026-10-27): absent in tests and
+	 *  bare agents; the composition root always wires it in production. */
+	verifyQuestion?: QuestionVerifier;
 	/** Job-tool wiring (sub-agent dispatch): the job store + the runner's
 	 *  spawn seam. The composition root injects both. */
 	jobStore: JobStore;

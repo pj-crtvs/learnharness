@@ -44,6 +44,10 @@ export interface PracticeToolContext {
 	 *  Each absent context (tests) = absent from the registry. */
 	graph?: GraphToolContext;
 	jobs?: JobToolContext;
+	/** The independent correctness gate (2026-10-27): the same verifier the
+	 *  quizzing tools use, applied to the problem's committed solution.
+	 *  Absent in tests and bare agents. */
+	verifyQuestion?: import("../question-verify.ts").QuestionVerifier;
 }
 
 /** TURN-SCOPED GATE STATE (the BKT incident, 2026-10-05): the gates used
@@ -97,6 +101,7 @@ export type ProblemInput = Static<typeof problemInputObject>;
 export function problemTool(
 	gate: PracticeGate,
 	graphNodes?: PracticeToolContext["graphNodes"],
+	verifyQuestion?: PracticeToolContext["verifyQuestion"],
 ): AgentTool<typeof problemInputObject> {
 	return {
 		name: "problem",
@@ -133,7 +138,7 @@ export function problemTool(
 			if (normalized.every((t, i) => t === target[i])) return healed as never;
 			return { ...(healed as Record<string, unknown>), target: normalized } as never;
 		},
-		execute: async (_toolCallId, input) => {
+		execute: async (_toolCallId, input, signal) => {
 			if (gate.problemActive) {
 				return invalidInputResult("problem", [
 					"a problem is already active — call conclude on it before posing the next one",
@@ -153,6 +158,13 @@ export function problemTool(
 						`target ${JSON.stringify(unknown)} is not a known proposition — targets must be proposition ids from the session context; if the material is not in the map, omit target entirely`,
 					]);
 				}
+			}
+			if (verifyQuestion) {
+				const verdict = await verifyQuestion.verify(
+					{ kind: "problem", statement: input.statement, modelSolution: input.modelSolution },
+					{ signal },
+				);
+				if (!verdict.ok) return invalidInputResult("problem", verdict.problems);
 			}
 			gate.problemActive = true;
 			return problemResult();
@@ -236,7 +248,7 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 	// keep their own (target-normalizing) prepareArguments as the composed
 	// inner pass; the double heal is idempotent by construction.
 	return healToolRecord({
-		problem: problemTool(gate, ctx.graphNodes),
+		problem: problemTool(gate, ctx.graphNodes, ctx.verifyQuestion),
 		conclude: concludeTool(gate),
 		read: readTool,
 		ls: lsTool,

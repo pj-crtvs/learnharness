@@ -1,5 +1,5 @@
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
-import { coverageOf } from "../core/coverage.ts";
+import { chatCoverageOf } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
 import { titleFromPrompt } from "../core/contracts.ts";
 import { graphRevision } from "./graph.ts";
@@ -142,7 +142,7 @@ export function sessionCoverage(chatId: string): SessionCoverage | null {
 	const entries = stores.graphStore.readCoverage();
 	// Wave B: the record is native history — coverage reads through the
 	// projection (same view the extraction pipeline folds).
-	const cov = coverageOf(record.messages, entries, chatId);
+	const cov = chatCoverageOf(record.messages, entries, chatId);
 	let lastFoldedAt: string | null = null;
 	for (const entry of entries) {
 		if (entry.chatId !== chatId) continue;
