@@ -16,7 +16,13 @@
  *   1. SOLVE blind — the question (and options) only. The solver returns its
  *      own answer. For multiple choice, a deterministic answer-set
  *      comparison decides pass/fail; no model verdict is involved.
- *   2. COMPARE (free recall + practice only) — a second one-shot call sees
+ *   2. CONFIRM (multiple choice, on a match only) — one blind solve is not
+ *      enough: live, the solver answered 250 (the committed wrong value) in
+ *      2 of 8 runs on the same question, so a single solve would pass a
+ *      wrong question ~25% of the time. A match therefore triggers a SECOND
+ *      independent blind solve; both must match. A mismatch on the first
+ *      solve rejects immediately (no second call).
+ *   3. COMPARE (free recall + practice only) — a second one-shot call sees
  *      the blind answer and the committed answer as equal-standing
  *      candidates and judges whether they are equivalent enough to grade
  *      against. Neither is labeled authoritative.
