@@ -18,6 +18,7 @@ export { dostStore } from "../store/dost.ts";
 export { learningStore } from "../store/learning.ts";
 export { knowledgeIntelligenceStore } from "../store/knowledge-intelligence.ts";
 export * from "./knowledge-intelligence.ts";
+export * from "./knowledge-graph.ts";
 export { piEngineForSpec } from "../agent/models.ts";
 export { runSubagent } from "../agent/subagents/pi-run.ts";
 export { pdfProbe, pdfInfo, pdfExtract } from "../agent/subagents/pdf-ops.ts";

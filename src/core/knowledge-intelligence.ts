@@ -215,6 +215,12 @@ export function validateKnowledgeGraphInput(nodes: any[], edges: any[]): Knowled
 	return { valid, errors, warnings, decision: valid ? (warnings.length ? "revise" : "approved") : "rejected" };
 }
 
+// Compatibility aliases for alternate naming.
+export const detectCycles = detectPrerequisiteCycles;
+export const classifyMastery = computeMasteryState;
+export const validateGraph = validateKnowledgeGraphInput;
+export const topologicalSort = topologicalOrder;
+
 export function defaultEvaluationCriteria() {
 	return {
 		factualAccuracy: 0,
