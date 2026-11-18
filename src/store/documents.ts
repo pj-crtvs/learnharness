@@ -132,7 +132,7 @@ export const documentStore = {
 	searchFigures(opts: { query: string; documentId?: string; chapter?: string; limit?: number }): FigureRecord[] {
 		const data = load();
 		const limit = opts.limit ?? 8;
-		const tokens = tokenize(opts.query);
+		const tokens = expandTokens(tokenize(opts.query));
 		let candidates = data.figures;
 		if (opts.documentId) candidates = candidates.filter((f) => f.documentId === opts.documentId);
 		if (opts.chapter) candidates = candidates.filter((f) => (f.chapter ?? "").toLowerCase().includes(opts.chapter!.toLowerCase()));
@@ -166,6 +166,26 @@ function tokenize(s: string): string[] {
 		.split(/[^a-z0-9]+/i)
 		.map((t) => t.trim())
 		.filter((t) => t.length > 2 && !STOPWORDS.has(t));
+}
+
+const SYNONYMS: Record<string, string[]> = {
+	collision: ["impact", "collide", "crash"],
+	momentum: ["impulse", "p"],
+	impulse: ["momentum", "force", "time"],
+	velocity: ["speed", "v"],
+	acceleration: ["a", "force"],
+	force: ["newton", "f"],
+	energy: ["kinetic", "potential", "work"],
+	graph: ["plot", "chart", "curve"],
+	figure: ["diagram", "illustration", "image"],
+};
+
+function expandTokens(tokens: string[]): string[] {
+	const out = new Set(tokens);
+	for (const t of tokens) {
+		for (const syn of SYNONYMS[t] ?? []) out.add(syn);
+	}
+	return [...out];
 }
 
 const STOPWORDS = new Set([

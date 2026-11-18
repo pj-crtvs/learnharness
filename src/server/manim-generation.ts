@@ -16,6 +16,7 @@ markdown fences) with this shape:
   "sceneName": string,
   "code": string,
   "explanation": string,
+  "scenes": [{"title": string, "description": string, "narration"?: string, "equation"?: string}],
   "keyTakeaways": string[],
   "misconceptions": string[],
   "knowledgeChecks": string[]
@@ -94,12 +95,20 @@ export async function generateManimAnimation(input: GenerationInput): Promise<Ge
 	const code = String(parsed.code || "");
 	if (!code.includes("from manim")) throw new Error("model did not return manim code");
 
+	const scenes = Array.isArray(parsed.scenes)
+		? parsed.scenes.map((s: Record<string, unknown>) => ({
+				title: String(s?.title || ""),
+				description: String(s?.description || ""),
+				narration: s?.narration ? String(s.narration) : undefined,
+				equation: s?.equation ? String(s.equation) : undefined,
+			}))
+		: [];
 	const animationSpec: AnimationSpec = {
 		title: String(parsed.title || input.topic),
 		subject: String(parsed.subject || input.subject || "mathematics"),
 		topic: String(parsed.topic || input.topic),
 		learningObjective: String(parsed.learningObjective || input.learningObjective || ""),
-		scenes: [],
+		scenes,
 		keyTakeaways: Array.isArray(parsed.keyTakeaways) ? parsed.keyTakeaways.map(String) : [],
 		misconceptions: Array.isArray(parsed.misconceptions) ? parsed.misconceptions.map(String) : [],
 		knowledgeChecks: Array.isArray(parsed.knowledgeChecks) ? parsed.knowledgeChecks.map(String) : [],
