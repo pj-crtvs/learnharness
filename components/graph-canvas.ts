@@ -286,6 +286,7 @@ export const LABELS_FADE_RATIO = 0.5;
 
 const GLOW_SCALE = 1.7; // halo outer radius = node radius x this (proportional, like blurring a copy of the disc)
 const GLOW_ALPHA = 0.3; // halo opacity at the disc edge, fading outward
+const SESSION_GLOW_ALPHA = 0.34; // the static session-highlight halo (side pane)
 const HOVER_FADE_MS = 180; // hover halo opacity fade length
 const ZOOM_EASE_MS = 45; // wheel-zoom glide: exponential-ease time constant (~250ms per notch)
 
@@ -584,6 +585,9 @@ export class GraphCanvasRenderer {
 	private nodeById = new Map<string, CanvasNode>();
 	private settings: GraphRenderSettings | null = null;
 	private visible: ReadonlySet<string> | null = null;
+	/** Session-contributed nodes (the side pane's provenance layer): ringed
+	 *  in the highlight color, drawn above the node fill. */
+	private highlight: ReadonlySet<string> | null = null;
 
 	// ── Live physics ──
 	// One d3-force sim shared with the server settle (createGraphSimulation
@@ -863,6 +867,14 @@ export class GraphCanvasRenderer {
 	setVisible(visible: ReadonlySet<string> | null): void {
 		this.visible = visible;
 		this.geoVersion++; // member visibility changes hulls + paths
+		this.markDirty();
+	}
+
+	/** Mark a set of nodes as session-contributed (ringed above the node
+	 *  fill). Pure presentation: it never affects picking, hulls, or the
+	 *  camera. Null/empty clears the layer. */
+	setHighlight(highlight: ReadonlySet<string> | null): void {
+		this.highlight = highlight;
 		this.markDirty();
 	}
 
@@ -1664,6 +1676,27 @@ export class GraphCanvasRenderer {
 		// 4. Nodes: one cached Path2D, one fill.
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
+
+		// 5. Session highlight (the side pane's provenance layer): a
+		//    persistent soft halo in the node color around every node this
+		//    session contributed — the whole map stays whole, the session
+		//    reads as lit. Same paint as hover, at a calmer fixed alpha (the
+		//    two multiply only if a highlighted node is also hovered).
+		if (this.highlight && this.highlight.size > 0) {
+			for (const id of this.highlight) {
+				const n = this.nodeById.get(id);
+				if (!n) continue;
+				if (this.visible && !this.visible.has(id)) continue;
+				const glow = ctx.createRadialGradient(n.x, n.y, nodeR, n.x, n.y, glowOuter);
+				glow.addColorStop(0, rgbaFromHex(data.colors.node, SESSION_GLOW_ALPHA));
+				glow.addColorStop(1, rgbaFromHex(data.colors.node, 0));
+				ctx.fillStyle = glow;
+				ctx.beginPath();
+				ctx.arc(n.x, n.y, glowOuter, 0, Math.PI * 2);
+				ctx.arc(n.x, n.y, nodeR, 0, Math.PI * 2, true);
+				ctx.fill("evenodd");
+			}
+		}
 
 		// 6. Node labels — one global gate, faded together. World-scaled
 		// with the graph (they grow as you zoom in, Obsidian-style).

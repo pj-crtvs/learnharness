@@ -44,6 +44,10 @@ export interface ChatStore {
 	saveMessages(id: string, messages: LhMessage[]): void;
 	/** Persist the session plan tree (plan tools call this in execute). */
 	saveTree(id: string, tree: PlanTree): void;
+	/** Attach the post-answer Taglish feedback to the answer's own record
+	 *  message (question toolResult / practice-thinking marker) — silent,
+	 *  the caller emits record-changed. False when the message is gone. */
+	attachAnswerFeedback(id: string, messageId: string, feedback: string): boolean;
 	/** Append one usage entry to the record's turn log (the money channel,
 	 * 2026-09): idempotent per turn id — each request carries its own, so
 	 * a turn persisted twice appends once while continuation turns (which

@@ -191,22 +191,43 @@ describe("interpretCompareReply — free recall and practice", () => {
 	});
 });
 
-describe("createQuestionVerifier — blind solve, then (if needed) compare", () => {
-	it("choice: solves without ever seeing the committed answer", async () => {
+describe("createQuestionVerifier — blind solve, then (if needed) confirm/compare", () => {
+	it("choice: a mismatch rejects on ONE call and never sees the committed answer", async () => {
 		const seen: string[] = [];
 		const verifier = createQuestionVerifier(
 			engineFor(['{"answer":["230"],"reason":"200 + 20 + 10"}'], seen),
 		);
 		const verdict = await verifier.verify(CHOICE);
 		assert.equal(verdict.ok, false);
-		assert.equal(seen.length, 1, "multiple choice is ONE call");
+		assert.equal(seen.length, 1, "a mismatch needs no confirmation call");
 		assert.doesNotMatch(seen[0]!, /"250"/, "the committed answer is not in the request");
 		assert.doesNotMatch(seen[0]!, /200 \+ 20 \+ 20/, "the committed explanation is not in the request");
 	});
 
-	it("choice: a matching blind answer passes", async () => {
-		const verifier = createQuestionVerifier(engineFor(['{"answer":["230"],"reason":"230"}']));
+	it("choice: a matching answer is posed only after a second independent confirmation", async () => {
+		const seen: string[] = [];
+		const verifier = createQuestionVerifier(
+			engineFor(['{"answer":["230"],"reason":"230"}', '{"answer":["230"],"reason":"230"}'], seen),
+		);
 		assert.equal((await verifier.verify(GOOD)).ok, true);
+		assert.equal(seen.length, 2, "a match triggers the confirmation solve");
+		for (const request of seen) assert.doesNotMatch(request, /"correctAnswer"|committed answer/);
+	});
+
+	it("choice: a confirmation that disagrees rejects the pose", async () => {
+		const verifier = createQuestionVerifier(
+			engineFor(['{"answer":["230"],"reason":"230"}', '{"answer":["250"],"reason":"double-counted padding"}']),
+		);
+		const verdict = await verifier.verify(GOOD);
+		assert.equal(verdict.ok, false, "one match is never enough");
+		if (!verdict.ok) assert.match(verdict.problems[0]!, /250/);
+	});
+
+	it("choice: an unusable confirmation fails closed", async () => {
+		const verifier = createQuestionVerifier(engineFor(['{"answer":["230"],"reason":"230"}', "I cannot help."]));
+		const verdict = await verifier.verify(GOOD);
+		assert.equal(verdict.ok, false);
+		if (!verdict.ok) assert.match(verdict.problems[0]!, /cannot be posed/);
 	});
 
 	it("free recall: blind answer + comparison, pass and fail", async () => {

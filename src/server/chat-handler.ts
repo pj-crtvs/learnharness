@@ -30,6 +30,8 @@ import { runPiTurn } from "./pi/ui-stream.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { createQuestionVerifier, type QuestionVerifier } from "../agent/question-verify.ts";
+import { practiceFeedbackRequest, questionFeedbackRequest } from "../agent/answer-feedback.ts";
+import { runAnswerFeedback } from "./feedback.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
@@ -44,7 +46,7 @@ import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction } from "./turn-service.ts";
-import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
+import { hasProbeDone, danglingQuestionOf, activeProblemOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
@@ -277,6 +279,50 @@ export async function handleChatInput(
 		throw err;
 	}
 
+	// THE POST-ANSWER FEEDBACK (owner, 2026-10-31): every graded answer gets
+	// a Taglish correction that speaks to what the learner actually wrote.
+	// The job is bound to the appended answer message (its id is the attach
+	// point) and fired only AFTER that append is durable below — so the
+	// learner's answer never waits on this extra model call.
+	const feedbackJob = (() => {
+		if (input.type === "answer") {
+			const result = appends.find(
+				(m) =>
+					(m as { role?: string }).role === "toolResult" &&
+					(m as { toolCallId?: string }).toolCallId === input.toolCallId,
+			);
+			if (!result) return null;
+			const request = questionFeedbackRequest(input.answer, danglingQuestionOf(record.messages)?.input);
+			return request ? { messageId: (result as { id: string }).id, request } : null;
+		}
+		if (input.type === "thinking" && record.kind === "practice") {
+			const marker = appends.find((m) => (m as { customType?: string }).customType === "practice-thinking");
+			const request = practiceFeedbackRequest(activeProblemOf(record.messages)?.input, input.text);
+			return marker && request ? { messageId: (marker as { id: string }).id, request } : null;
+		}
+		return null;
+	})();
+	const startFeedback = () => {
+		if (!feedbackJob) return;
+		// Tests script the transcript through the injected agent engine; the
+		// feedback call has no scripted seam, so it stays out of test runs
+		// (the extraction/compaction precedent). The orchestration is pinned
+		// directly against a faux engine in tests/answer-feedback.test.ts.
+		if (process.env.NODE_ENV === "test") return;
+		let engine: PiEngine;
+		try {
+			// Background engine: feedback is not part of the turn's foreground
+			// request (and the ChatGPT bridge's background admission applies).
+			engine = piEngineForSpec(conversation, true);
+		} catch {
+			return; // no live engine — no feedback, never a failed answer path
+		}
+		void runAnswerFeedback(stores.chatStore, engine, `${engine.model.provider}:${engine.model.id}`, {
+			chatId,
+			...feedbackJob,
+		});
+	};
+
 	// THE PARALLEL-QUESTION GATE (owner, 2026-10-03 — the deepseek parallel
 	// batch incident): an answer that leaves a SIBLING question dangling
 	// defers its wake. The dock advances to the next question (the client's
@@ -291,6 +337,7 @@ export async function handleChatInput(
 		const merged = [...record.messages, ...appends];
 		stores.chatStore.saveMessages(chatId, merged);
 		emit("record-changed", { chatId });
+		startFeedback();
 		return settledTurnResponse(); // the cheap terminal — no beginTurn, no turn
 	}
 
@@ -322,6 +369,9 @@ export async function handleChatInput(
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 	}
+	// Persisted → the learner's answer is durable; the Taglish correction can
+	// now run in parallel with the teacher's turn.
+	startFeedback();
 
 	// MONEY CHANNEL (wave 4): one collector per request, fed by the agent's
 	// message_end events. Every model call's usage lands in the chat record's
@@ -438,6 +488,19 @@ export async function handleChatInput(
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
+						figureSearch: (opts) =>
+							stores.documentStore.searchFigures(opts).map((f) => ({
+								id: f.id,
+								documentId: f.documentId,
+								page: f.page,
+								figureNumber: f.figureNumber,
+								caption: f.caption,
+								chapter: f.chapter,
+								section: f.section,
+								surroundingText: f.surroundingText,
+								concepts: f.concepts,
+								imageUrl: `/api/documents/${f.documentId}/figures/${f.id}/image`,
+							})),
 					},
 					agentOpts,
 				)
@@ -453,6 +516,19 @@ export async function handleChatInput(
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
 						verifyQuestion,
 						searchAvailable,
+						figureSearch: (opts) =>
+							stores.documentStore.searchFigures(opts).map((f) => ({
+								id: f.id,
+								documentId: f.documentId,
+								page: f.page,
+								figureNumber: f.figureNumber,
+								caption: f.caption,
+								chapter: f.chapter,
+								section: f.section,
+								surroundingText: f.surroundingText,
+								concepts: f.concepts,
+								imageUrl: `/api/documents/${f.documentId}/figures/${f.id}/image`,
+							})),
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —
 						// graph master switch AND the agent.graphTools toggle.

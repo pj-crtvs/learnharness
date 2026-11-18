@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -48,7 +48,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, CopyIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -274,6 +274,21 @@ export function Chat({
 	const [renaming, setRenaming] = useState(false);
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+
+	const [copiedTranscript, setCopiedTranscript] = useState(false);
+	const copyTranscript = useCallback(async () => {
+		try {
+			const res = await fetch(`/api/chats/${chatId}/markdown`);
+			if (!res.ok) throw new Error(`markdown fetch failed: ${res.status}`);
+			const text = await res.text();
+			await navigator.clipboard.writeText(text);
+			setCopiedTranscript(true);
+			window.setTimeout(() => setCopiedTranscript(false), 2000);
+		} catch (err) {
+			console.error("copy transcript failed:", err);
+		}
+	}, [chatId]);
 
 	const commitRename = useCallback(
 		async (next: string) => {
@@ -1295,6 +1310,16 @@ export function Chat({
 					{/* Practice (owner, 2026-10-04): the coverage ring hides —
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
+					<Hint label={copiedTranscript ? "Copied" : "Copy transcript"}>
+						<button
+							type="button"
+							onClick={() => void copyTranscript()}
+							data-testid="copy-transcript"
+							className="lh-no-drag flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						>
+							{copiedTranscript ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+						</button>
+					</Hint>
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}

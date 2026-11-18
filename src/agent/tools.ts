@@ -18,6 +18,7 @@ import type { JobStore } from "../core/ports.ts";
 import type { QuestionVerifier } from "./question-verify.ts";
 import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
 import { planTools, type PlanToolContext } from "./tools/plan.ts";
+import { figureTools, type FigureToolContext } from "./tools/figures.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
 import { proberGraphTools } from "./tools/graph.ts";
 import { readTool } from "./tools/read.ts";
@@ -338,6 +339,8 @@ export interface ProberToolContext extends ProbeDoneContext {
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
 	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
+	/** Optional textbook figure retrieval (uploaded PDFs). Absent = no tool. */
+	figureSearch?: FigureToolContext["searchFigures"];
 	/** The prober's graph-map reader (wave 7): present = the two map tools
 	 *  (list_sessions / list_propositions) are registered. The composition
 	 *  root passes it only when graphToolsEnabled(effective) — the graph
@@ -407,6 +410,8 @@ export function createProberTools(
 				// remains available without a search-provider key.
 				...(jobs.research ? { research: jobs.research } : {}),
 				pdf: jobs.pdf!,
+				// Textbook figure retrieval (uploaded PDFs), when wired.
+				...(ctx.figureSearch ? figureTools({ searchFigures: ctx.figureSearch }) : {}),
 				// The map reader (wave 7): present only when the settings gate
 				// opened.
 				...(ctx.graphStore
@@ -493,6 +498,8 @@ export interface TeacherToolContext extends PlanToolContext {
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
 	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
+	/** Optional textbook figure retrieval (uploaded PDFs). Absent = no tool. */
+	figureSearch?: FigureToolContext["searchFigures"];
 }
 
 /**
@@ -552,6 +559,7 @@ export function createTeacherTools(
 			grep: grepTool,
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
+			...(ctx.figureSearch ? figureTools({ searchFigures: ctx.figureSearch }) : {}),
 		},
 		withoutMechanics(enabled),
 		),

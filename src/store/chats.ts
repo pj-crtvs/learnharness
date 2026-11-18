@@ -172,6 +172,27 @@ export function dedupeChatRecords(): void {
 	}
 }
 
+/** Attach the post-answer Taglish feedback to its answer record message
+ *  (owner, 2026-10-31): the `feedback` field rides the message's `details`
+ *  — the toolResult for a graded question, the practice-thinking marker for
+ *  a problem submission. Silent (no event): the caller announces the write.
+ *  Returns false when the message is gone (compaction replaced it) — the
+ *  feedback is then dropped rather than written onto a stranger. */
+function attachAnswerFeedback(id: string, messageId: string, feedback: string): boolean {
+	const record = getChat(id);
+	if (!record) return false;
+	const message = record.messages.find((m) => (m as { id?: unknown }).id === messageId);
+	if (!message) return false;
+	const details = (message as { details?: unknown }).details;
+	if (!details || typeof details !== "object") return false;
+	(message as { details: Record<string, unknown> }).details = {
+		...(details as Record<string, unknown>),
+		feedback,
+	};
+	writeChat(record);
+	return true;
+}
+
 /** Append one usage entry to the record's turn log — idempotent per
  * turn id: each REQUEST carries its own id, so a replay of the same turn's
  * persist appends once, while continuation turns (which share a response
@@ -255,6 +276,7 @@ export const chatStore: ChatStore = {
 	saveSettings,
 	renameChat,
 	deleteChat,
+	attachAnswerFeedback,
 	appendTurnUsage,
 	appendExtractionUsage,
 };

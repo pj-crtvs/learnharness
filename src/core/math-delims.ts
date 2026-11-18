@@ -75,6 +75,26 @@ function atLineStart(text: string, i: number): boolean {
 	return i === 0 || text[i - 1] === "\n";
 }
 
+/** A closer that lost its backslash (owner, 2026-10-28): authors occasionally
+ *  emit `\(y)` instead of `\(y\)`, which leaves the whole span literal. This
+ *  finds that bare `)`/`]` — but only when the reading is unambiguous: on the
+ *  same line, non-empty content, no whitespace, no backslash, no nested
+ *  opener, at most 40 chars. Anything looser would eat prose (the reason this
+ *  is a repair, not a parser). */
+function findSlipClose(text: string, from: number, closer: ")" | "]"): number {
+	for (let j = from; j < text.length; j++) {
+		const ch = text[j]!;
+		if (ch === "\n" || ch === "`" || ch === " " || ch === "\t") return -1;
+		if (ch === closer) {
+			const content = text.slice(from, j);
+			if (content.length === 0 || content.length > 40) return -1;
+			return /^[A-Za-z0-9_^{}.+\-*/=<>|,'!]+$/.test(content) ? j : -1;
+		}
+		if (ch === "\\" || ch === "(" || ch === "[") return -1;
+	}
+	return -1;
+}
+
 /**
  * Copy a fenced code block starting at `i` (line start, fence regex matched)
  * verbatim to the output. Returns the index after the closing fence line —
@@ -213,8 +233,15 @@ export function transformMathDelimiters(markdown: string): string {
 				const open = isDisplay ? DISPLAY_OPEN : INLINE_OPEN;
 				const close = isDisplay ? DISPLAY_CLOSE : INLINE_CLOSE;
 				const closeAt = findClose(markdown, i + open.length, close);
-				if (closeAt !== -1) {
-					const content = markdown.slice(i + open.length, closeAt).trim();
+				// A missing backslash on the closer (`\(y)`) is a common authoring
+				// slip; recover it only in the unambiguous shape findSlipClose
+				// accepts. A properly closed span always wins.
+				const slipAt =
+					closeAt === -1 ? findSlipClose(markdown, i + open.length, isDisplay ? "]" : ")") : -1;
+				const closeFrom = closeAt !== -1 ? closeAt : slipAt;
+				const closeLen = closeAt !== -1 ? close.length : 1;
+				if (closeFrom !== -1) {
+					const content = markdown.slice(i + open.length, closeFrom).trim();
 					if (content.length > 0) {
 						if (isDisplay && displayIsIndented(markdown, i)) {
 							// Indented display math (inside a list item, quote, …):
@@ -229,7 +256,7 @@ export function transformMathDelimiters(markdown: string): string {
 							// closer) would half-parse into literal dollars + KaTeX
 							// errors — pad with blank lines to force a clean block.
 							// Block-positioned math passes through in place.
-							const afterClose = closeAt + close.length;
+							const afterClose = closeFrom + closeLen;
 							const padBefore =
 									displayIsBlockPositioned(markdown, i) ? "" : "\n\n";
 							const padAfter =
@@ -240,7 +267,7 @@ export function transformMathDelimiters(markdown: string): string {
 							// (renders inline, not display).
 							out.push(`$$${content}$$`);
 						}
-						i = closeAt + close.length;
+						i = closeFrom + closeLen;
 						continue;
 					}
 				}

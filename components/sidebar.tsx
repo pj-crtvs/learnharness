@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { BinaryIcon, BrainIcon, ClipboardCheckIcon, DumbbellIcon, FilmIcon, LayersIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PinIcon, PinOffIcon, PlusIcon, SearchIcon, SettingsIcon, TargetIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -390,6 +390,24 @@ function SessionsSidebar() {
 		setKindFilter(f);
 		window.localStorage.setItem(KIND_FILTER_KEY, f);
 	}, []);
+	const [pinned, setPinned] = useState<Set<string>>(new Set());
+	useEffect(() => {
+		try {
+			const raw = window.localStorage.getItem("lh:pinned-sessions");
+			if (raw) setPinned(new Set(JSON.parse(raw) as string[]));
+		} catch {
+			// ignore corrupt storage
+		}
+	}, []);
+	const togglePin = useCallback((id: string) => {
+		setPinned((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id); else next.add(id);
+			try { window.localStorage.setItem("lh:pinned-sessions", JSON.stringify([...next])); } catch { // best effort
+			}
+			return next;
+		});
+	}, []);
 	const pathname = usePathname();
 	const router = useRouter();
 	const { open: openSettings } = useSettingsDialog();
@@ -412,13 +430,16 @@ function SessionsSidebar() {
 			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
 		}
 		if (!list) return list;
-		if (!q) return list;
+		if (!q) {
+			// Pinned sessions float to the top of the natural order.
+			return [...list].sort((a, b) => (pinned.has(b.id) ? 1 : 0) - (pinned.has(a.id) ? 1 : 0));
+		}
 		return list
 			.map((c) => ({ c, score: fuzzyScore(q, c.title) }))
 			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
 			.sort((a, b) => b.score - a.score)
 			.map((r) => r.c);
-	}, [chats, query, kindFilter]);
+	}, [chats, query, kindFilter, pinned]);
 
 	const refreshInFlightRef = useRef(false);
 	const refresh = useCallback(async () => {
@@ -602,6 +623,13 @@ function SessionsSidebar() {
 		(id: string, _mode: ChatDeleteMode, graphRevision: number) => {
 			setDeleting(null);
 			setChats((prev) => (prev ? prev.filter((c) => c.id !== id) : prev));
+			setPinned((prev) => {
+				if (!prev.has(id)) return prev;
+				const next = new Set(prev);
+				next.delete(id);
+				try { window.localStorage.setItem("lh:pinned-sessions", JSON.stringify([...next])); } catch { /* best effort */ }
+				return next;
+			});
 			if (pathname === `/chat/${id}`) router.push("/");
 			window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { revision: graphRevision } }));
 		},
@@ -680,6 +708,7 @@ function SessionsSidebar() {
 					</Hint>
 				</div>
 
+				<div className="mx-3 mb-1 text-[10px] uppercase tracking-widest text-muted-foreground/70">Learn</div>
 				{/* Two doors, STACKED (owner round 8, 2026-10-05 — was a
 				    half/half row): full-width rows read cleaner and give the
 				    labels room; teaching keeps the original draft route,
@@ -705,6 +734,54 @@ function SessionsSidebar() {
 						Practice
 						<span className="sr-only">create a new practice session</span>
 					</button>
+					<Link
+						href="/flashcards"
+						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<LayersIcon className="size-3" />
+						Flashcards
+						<span className="sr-only">open flashcards studio</span>
+					</Link>
+					<Link
+						href="/exam-readiness"
+						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<ClipboardCheckIcon className="size-3" />
+						Exam Readiness
+						<span className="sr-only">open examination readiness</span>
+					</Link>
+					<Link
+						href="/learning"
+						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<BrainIcon className="size-3" />
+						Learning
+						<span className="sr-only">open learning and mastery</span>
+					</Link>
+					<Link
+						href="/dost"
+						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<TargetIcon className="size-3" />
+						DOST-JLSS
+						<span className="sr-only">open dost jlss review center</span>
+					</Link>
+					<Link
+						href="/visualizers"
+						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<BinaryIcon className="size-3" />
+						Visualizers
+						<span className="sr-only">open cs visualizers</span>
+					</Link>
+					<Link
+						href="/visual"
+						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<FilmIcon className="size-3" />
+						Visual Learning Studio
+						<span className="sr-only">open visual learning studio</span>
+					</Link>
 				</div>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
@@ -901,6 +978,18 @@ function SessionsSidebar() {
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
 							Export as Markdown…
+						</button>
+						<button
+							type="button"
+							data-testid="ctx-pin"
+							onClick={() => {
+								if (ctxChatId) togglePin(ctxChatId);
+								setCtxChatId(null);
+							}}
+							className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+						>
+							{ctxChatId && pinned.has(ctxChatId) ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+							{ctxChatId && pinned.has(ctxChatId) ? "Unpin" : "Pin"}
 						</button>
 						<button
 							type="button"

@@ -467,6 +467,10 @@ export interface QuestionAnswerData {
 	correctIndices?: number[]; // quiz only (rendering)
 	committed?: string; // explain only (rendering): the model's committed answer
 	explanation?: string; // quiz only (rendering)
+	/** The post-answer Taglish feedback (owner, 2026-10-31): generated once
+	 *  after the learner answers, addressed to their own answer/thinking.
+	 *  Record-only — never sent to the model. */
+	feedback?: string;
 	dismissed?: boolean;
 	answeredAt: string;
 }

@@ -397,8 +397,9 @@ export interface QuestionVerifierOptions {
 }
 
 /** 45s per call (owner, 2026-10-27): live verifier calls at `high` thinking
- *  measured 9–26s; a 25s ceiling already cut a good call short. Free recall
- *  and practice make two calls, so their worst case is two ceilings. */
+ *  measured 9–26s; a 25s ceiling already cut a good call short. Multiple
+ *  choice confirms a match with a second solve, and free recall + practice
+ *  make a solve plus a comparison, so their worst case is two ceilings. */
 const DEFAULT_TIMEOUT_MS = 45_000;
 
 type CallOutcome = { ok: true; text: string } | { ok: false; failure: string };
@@ -463,26 +464,45 @@ export function createQuestionVerifier(
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	return {
 		async verify(input, opts = {}) {
-			const solved = await oneShot(engine, SOLVER_SYSTEM_PROMPT, solverPrompt(input), opts, timeoutMs);
-			if (!solved.ok) return unusable(solved.failure);
-			const solverReply = parseSolverReply(solved.text);
-			if (!solverReply) return unusable("the blind solver did not return a usable answer");
+			const solve = async (): Promise<
+				{ ok: true; reply: SolverReply } | { ok: false; result: QuestionVerificationResult }
+			> => {
+				const solved = await oneShot(engine, SOLVER_SYSTEM_PROMPT, solverPrompt(input), opts, timeoutMs);
+				if (!solved.ok) return { ok: false, result: unusable(solved.failure) };
+				const reply = parseSolverReply(solved.text);
+				if (!reply) return { ok: false, result: unusable("the blind solver did not return a usable answer") };
+				return { ok: true, reply };
+			};
 
-			if (input.kind === "choice") return interpretSolverReply(solverReply, input);
+			const first = await solve();
+			if (!first.ok) return first.result;
+
+			if (input.kind === "choice") {
+				const verdict = interpretSolverReply(first.reply, input);
+				// CONFIRM-ON-MATCH (owner, 2026-10-28): one blind solve is not
+				// enough. Live, the same question got the committed wrong value
+				// from the solver in 2 of 8 runs, so a single match would pass a
+				// wrong question roughly a quarter of the time. A mismatch
+				// rejects immediately; a match must be independently confirmed.
+				if (!verdict.ok) return verdict;
+				const second = await solve();
+				if (!second.ok) return second.result;
+				return interpretSolverReply(second.reply, input);
+			}
 
 			// Free recall + practice: a second call compares the blind answer
 			// with the committed one as equal-standing candidates.
 			const compared = await oneShot(
 				engine,
 				COMPARE_SYSTEM_PROMPT,
-				comparePrompt(input, solverReply.answer.join("\n")),
+				comparePrompt(input, first.reply.answer.join("\n")),
 				opts,
 				timeoutMs,
 			);
 			if (!compared.ok) return unusable(compared.failure);
 			const compareReply = parseCompareReply(compared.text);
 			if (!compareReply) return unusable("the answer comparison did not return a usable verdict");
-			return interpretCompareReply(compareReply, input, solverReply.answer.join("\n"));
+			return interpretCompareReply(compareReply, input, first.reply.answer.join("\n"));
 		},
 	};
 }

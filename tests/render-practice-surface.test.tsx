@@ -190,6 +190,23 @@ describe("the practice transcript cards", () => {
 		assert.match(legacy, /YOUR THINKING/);
 		assert.doesNotMatch(legacy, /Your solution/);
 	});
+
+	it("ThinkingCard shows the post-submission Taglish feedback below the trace", () => {
+		const html = renderToStaticMarkup(
+			<ThinkingCard
+				data={{
+					problemCallId: "c",
+					commit: false,
+					text: "stuck at step two",
+					feedback: "Tama ang setup mo, pero nakalimutan mong i-distribute ang negative sign.",
+				}}
+			/>,
+		);
+		assert.match(html, /data-testid="practice-feedback"/);
+		assert.match(html, /nakalimutan mong i-distribute/);
+		const none = renderToStaticMarkup(<ThinkingCard data={{ problemCallId: "c", commit: false, text: "stuck" }} />);
+		assert.ok(!none.includes('data-testid="practice-feedback"'), "no feedback, no block");
+	});
 });
 
 // ── the view projection ──────────────────────────────────────────────────────

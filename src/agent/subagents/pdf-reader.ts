@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { Agent, setGlobalDispatcher } from "undici";
+
+try {
+	setGlobalDispatcher(new Agent({ headersTimeout: 10 * 60 * 1000, bodyTimeout: 10 * 60 * 1000 }));
+} catch {
+	// undici may be unavailable in some test harnesses.
+}
 import type { AssistantMessage, Message, ToolResultMessage, Usage, Tool } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
@@ -306,7 +313,8 @@ export async function runPdfReaderAgent(
 						toolResults.push(toolText(call.id, call.name, `ERROR: unknown tool "${call.name}"`));
 					}
 				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
+					const raw = err instanceof Error ? err.message : String(err);
+		const msg = /timed out/i.test(raw) ? "the model took too long to start responding — retry with a shorter question or fewer pages" : raw;
 					toolResults.push(toolText(call.id, call.name, `ERROR: ${msg}`));
 				}
 			}

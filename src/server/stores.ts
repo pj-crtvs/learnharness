@@ -10,6 +10,7 @@ import { chatStore, dedupeChatRecords } from "../store/chats.ts";
 import { graphStore } from "../store/graph.ts";
 import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
+import { documentStore } from "../store/documents.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 
 // One-time record hygiene (owner, 2026-10-27): duplicate-id messages from the
@@ -23,6 +24,7 @@ export const stores = {
 	graphStore,
 	jobStore,
 	settingsStore,
+	documentStore,
 };
 
 export type Stores = typeof stores;

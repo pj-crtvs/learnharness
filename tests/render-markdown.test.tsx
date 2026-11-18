@@ -86,6 +86,29 @@ describe("math delimiter transform (pure unit)", () => {
 		);
 	});
 
+	it("repairs a closer that lost its backslash (\\(y) → $y$)", () => {
+		// The owner's live WHY string: `\(dy\)` is fine, `\(y)` and `\(x)`
+		// lost the closer's backslash — repair those, never prose.
+		assert.equal(
+			transformMathDelimiters("integrate in \\(y) and treat \\(x) as constant"),
+			"integrate in $$y$$ and treat $$x$$ as constant",
+		);
+		assert.equal(transformMathDelimiters("a \\(dy\\) then \\(y), ok"), "a $$dy$$ then $$y$$, ok");
+	});
+
+	it("does not repair ambiguous bare parens (spaces, backslashes, nesting)", () => {
+		for (const md of [
+			"open \\(x + y) here",
+			"open \\(\\frac{a}{b}) here",
+			"open \\(x) and \\(y\\) later",
+		]) {
+			const out = transformMathDelimiters(md);
+			assert.ok(out.includes("\\("), `left ambiguous: ${md}`);
+		}
+		// A well-formed span with parens inside still converts normally.
+		assert.equal(transformMathDelimiters("open \\(f(x)\\) fine"), "open $$f(x)$$ fine");
+	});
+
 	it("still converts a later balanced pair when an earlier one is unbalanced", () => {
 		assert.equal(
 			transformMathDelimiters("\\[ partial\n\nbut \\(ok\\)"),

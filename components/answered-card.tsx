@@ -192,6 +192,19 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 				/>
 			)}
 
+			{/* The post-answer Taglish feedback (owner, 2026-10-31): generated
+			    once after submitting, auto-expanded above the tucked English
+			    "Why" — the correction the learner reads first. */}
+			{answer.feedback && (
+				<div
+					className="mt-2 rounded-lg border border-primary/25 bg-accent/40 px-3 py-2 text-sm"
+					data-testid="answer-feedback"
+				>
+					<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Feedback</div>
+					<MessageResponse>{answer.feedback}</MessageResponse>
+				</div>
+			)}
+
 			{/* px-3→removed: card p-4 + box px-3 double-inset sat the "Why" label deeper
 			    than the option box edges (owner, round 3). Sides flush with everything
 			    else; py-2 stays for vertical air. */}

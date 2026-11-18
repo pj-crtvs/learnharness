@@ -2561,7 +2561,10 @@ describe("question-content fallback in the pipeline (owner, 2026-10-27)", () => 
 	};
 
 	function verifier(reply: unknown): PiEngine {
-		return fauxEngine([fauxAssistantMessage([fauxText(JSON.stringify(reply))])]);
+		// Confirm-on-match: a choice that MATCHES is solved twice, so the
+		// fixture scripts the same reply twice (a mismatch stops after one).
+		const step = () => fauxAssistantMessage([fauxText(JSON.stringify(reply))]);
+		return fauxEngine([step, step]);
 	}
 
 	it("extracts verified question content from a prose-less chat and covers it", async () => {

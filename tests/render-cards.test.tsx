@@ -253,6 +253,18 @@ describe("render smoke tests", () => {
 		assert.ok(html.includes('data-mark="check"') && html.includes('data-mark="x"'));
 	});
 
+	it("AnsweredCard shows the post-answer Taglish feedback above the Why", () => {
+		const answer = { ...buildAnswer(quizQD(), { values: ["Venus"] }), feedback: "Venus ang pinili mo, pero Mercury ang pinakamalapit sa araw." };
+		const html = renderToStaticMarkup(<AnsweredCard answer={answer} />);
+		assert.match(html, /data-testid="answer-feedback"/);
+		assert.match(html, /Feedback/);
+		assert.match(html, /Mercury ang pinakamalapit/);
+		// The English explanation stays tucked behind the Why.
+		assert.ok(!html.includes("innermost"), "the English why is still collapsed");
+		const none = renderToStaticMarkup(<AnsweredCard answer={buildAnswer(quizQD(), { values: ["Venus"] })} />);
+		assert.ok(!none.includes('data-testid="answer-feedback"'), "no feedback, no block");
+	});
+
 	it("AnsweredCard shows the confidence rail on quiz answers (record, no disc)", () => {
 		// The slider's rail, disc removed: same paint, same ticks, the % read-out.
 		const answer = buildAnswer(quizQD(), { values: ["Venus"], confidence: 70 });
