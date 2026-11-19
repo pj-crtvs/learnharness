@@ -44,7 +44,7 @@ export const DEFAULT_CUSTOM_PROVIDERS: readonly CustomProviderConfig[] = [
 		baseUrl: "https://llmrouter.boyemma.com/v1",
 		dialect: "openai-completions",
 		noKeyNeeded: false,
-		apiKey: "sk-Y_I9r7GUE-kJ5ir_e6v7Fg",
+
 		models: [
 			{
 				id: "auto",

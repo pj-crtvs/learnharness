@@ -31,6 +31,7 @@ export function CustomProviderCard({
 	const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
 	const [dialect, setDialect] = useState<"openai-completions">("openai-completions");
 	const [noKeyNeeded, setNoKeyNeeded] = useState(provider?.noKeyNeeded ?? false);
+	const [showApiKey, setShowApiKey] = useState(false);
 	const [apiKey, setApiKey] = useState("");
 	const [models, setModels] = useState<CustomModelConfig[]>(
 		provider?.models && provider.models.length > 0
@@ -255,14 +256,26 @@ export function CustomProviderCard({
 							<label className="text-[11px] text-muted-foreground">
 								API key (leave blank to keep the saved key)
 							</label>
-							<input
-								type="password"
-								value={apiKey}
-								disabled={busy}
-								onChange={(e) => setApiKey(e.target.value)}
-								placeholder={provider?.keySaved ? "••••••••••••••••••••••••••" : "Paste API key…"}
-								className="h-7 rounded-sm border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-muted-foreground"
-							/>
+							<div className="flex items-center gap-2">
+								<input
+									type={showApiKey ? "text" : "password"}
+									value={apiKey}
+									disabled={busy}
+									onChange={(e) => setApiKey(e.target.value)}
+									placeholder={provider?.keySaved ? "••••••••••••••••••••••••••" : "Paste API key…"}
+									className="h-7 flex-1 rounded-sm border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-muted-foreground"
+								/>
+								<button
+									type="button"
+									data-testid="custom-provider-key-show"
+									aria-label={showApiKey ? "Hide API key" : "Show API key"}
+									onClick={() => setShowApiKey((v) => !v)}
+									disabled={busy}
+									className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+								>
+									{showApiKey ? "Hide" : "Show"}
+								</button>
+							</div>
 						</div>
 					)}
 

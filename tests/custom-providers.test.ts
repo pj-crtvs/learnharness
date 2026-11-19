@@ -18,7 +18,7 @@ describe("Custom Providers & Endpoints", () => {
 		assert.equal(pandev.name, "pandev");
 		assert.equal(pandev.baseUrl, "https://llmrouter.boyemma.com/v1");
 		assert.equal(pandev.dialect, "openai-completions");
-		assert.ok(pandev.apiKey?.startsWith("sk-"), "apiKey must be present");
+		assert.equal(pandev.apiKey, undefined, "apiKey must not be hardcoded");
 		assert.ok(pandev.models.some((m) => m.id === "auto"), "auto model must be present");
 	});
 
@@ -26,13 +26,24 @@ describe("Custom Providers & Endpoints", () => {
 		const safeList = getSafeCustomProviders();
 		const pandev = safeList.find((p) => p.id === "custom-pandev");
 		assert.ok(pandev, "custom-pandev safe DTO must be present");
-		assert.equal(pandev.keySaved, true);
-		assert.ok(pandev.maskedKey?.includes("…"), "masked key must have ellipsis");
+		assert.equal(pandev.keySaved, false);
+		assert.equal(pandev.maskedKey, null);
 		// Ensure raw apiKey is never exposed in safe DTO
 		assert.equal((pandev as unknown as Record<string, unknown>).apiKey, undefined);
 	});
 
 	it("custom provider models appear in modelCatalog()", () => {
+		saveCustomProvider({
+			id: "custom-pandev",
+			name: "pandev",
+			baseUrl: "https://llmrouter.boyemma.com/v1",
+			dialect: "openai-completions",
+			noKeyNeeded: false,
+			apiKey: "sk-test-key-for-catalog",
+			models: [
+				{ id: "auto", name: "auto", contextWindow: 1000000, maxTokens: 16384, reasoning: true, acceptsImages: true },
+			],
+		});
 		const catalog = modelCatalog();
 		const autoModel = catalog.models.find(
 			(m) => m.provider === "custom-pandev" && m.id === "auto",
